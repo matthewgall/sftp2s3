@@ -1,0 +1,69 @@
+server:
+  host: 0.0.0.0
+  port: 2222
+  host_key: host_rsa_key
+  log_level: info        # debug, info, warn, error
+  log_format: text       # text or json
+  shutdown_timeout: 30s  # how long to wait for SFTP sessions on shutdown
+  metrics_addr: :2112    # Prometheus /metrics and /healthz endpoint
+  cache_dir: /var/cache/sftp2s3  # general cache directory (used by sshid.io keys)
+  backend_health_interval: 30s  # periodic backend health checks; set to 0 to disable
+  auth_failures:
+    max_attempts: 5
+    window: 5m
+    block_duration: 15m
+    tarpit_delay: 2s
+    state_file: /opt/sftp2s3/auth_state.json
+    save_interval: 1m
+
+users:
+  - username: backup
+    password: changeme
+    # Omit backends to allow all. List names to restrict.
+    # backends:
+    #   - primary
+    # prefix chroots the user under each backend root (hidden from the user).
+    # prefix: site1
+    # authorized_keys accepts key strings or file paths.
+    # authorized_keys:
+    #   - /home/backup/.ssh/authorized_keys
+    #   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... backup@example
+    # permissions restricts the operations this user may perform.
+    # Omit the field (or leave it empty) to grant read, write, and delete.
+    # permissions:
+    #   - read
+    #   - write
+    #   - delete
+    # sshid fetches and caches public keys from https://sshid.io/username
+    # sshid:
+    #   username: matthewgall
+    #   # algorithms is optional and limits which key types to accept.
+    #   # algorithms:
+    #   #   - ed25519
+    #   #   - ecdsa
+    #   #   - rsa
+    #   cache_dir: /var/cache/sftp2s3/sshid
+    # max_connections: 5
+    # rate_limit_bytes_per_sec: 1048576
+
+backends:
+  - name: primary
+    endpoint_url: ${S3_ENDPOINT:-https://s3.amazonaws.com}
+    region: ${AWS_REGION:-us-east-1}
+    access_key_id: ${AWS_ACCESS_KEY_ID}
+    secret_access_key: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+    bucket: ${S3_BUCKET}
+    prefix: router/
+    timeout: 60s
+    # use_path_style: false
+    # part_size: 8388608
+
+  - name: minio
+    endpoint_url: ${MINIO_ENDPOINT}
+    region: ${MINIO_REGION:-us-east-1}
+    access_key_id: ${MINIO_ACCESS_KEY_ID}
+    secret_access_key: ${MINIO_SECRET_ACCESS_KEY:?set MINIO_SECRET_ACCESS_KEY}
+    bucket: ${MINIO_BUCKET}
+    prefix: router/
+    use_path_style: true
+    part_size: 8388608

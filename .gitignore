@@ -1,0 +1,7 @@
+sftp2s3
+sftp2s3-static
+config.yaml
+host_rsa_key
+*.pem
+
+coverage.out

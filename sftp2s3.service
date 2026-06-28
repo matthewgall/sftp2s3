@@ -1,0 +1,32 @@
+[Unit]
+Description=sftp2s3 SFTP-to-S3 bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sftp2s3
+Group=sftp2s3
+WorkingDirectory=/opt/sftp2s3
+ExecStart=/opt/sftp2s3/sftp2s3 -c /opt/sftp2s3/config.yaml
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Load env vars for ${...} substitution in config.yaml
+EnvironmentFile=-/opt/sftp2s3/sftp2s3.env
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+CacheDirectory=sftp2s3
+ReadWritePaths=/opt/sftp2s3 /var/cache/sftp2s3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sftp2s3
+
+[Install]
+WantedBy=multi-user.target
