@@ -28,8 +28,8 @@ jobs:
       - name: Test
         run: go test ./...
 
-      - name: Build static binary
-        run: make build-static
+      - name: Build binaries
+        run: make build && make build-static
 
       - name: Check version flag
-        run: ./sftp2s3-static -version
+        run: ./sftp2s3 -version && ./sftp2s3-static -version
