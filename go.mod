@@ -1,6 +1,6 @@
 module github.com/user/sftp2s3
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.30.1
@@ -12,7 +12,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.41.0
-	golang.org/x/time v0.5.0
+	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
