@@ -33,7 +33,7 @@ cp config.example.yaml config.yaml
 # edit config.yaml
 ```
 
-Environment variables are substituted in the config file:
+Environment variables are substituted in the config file using braced syntax:
 
 ```yaml
 access_key_id: ${AWS_ACCESS_KEY_ID}
@@ -45,6 +45,8 @@ bucket: ${S3_BUCKET:-defaultbucket}
 - `${VAR:-default}` — uses `default` if `VAR` is unset or empty
 - `${VAR:?message}` — fails to start with `message` if `VAR` is unset or empty
 
+Bare `$VAR` is intentionally **not** substituted, so values like bcrypt password hashes containing `$` are preserved unchanged.
+
 ## Authentication
 
 Password auth and public-key auth are supported. You can use one or both.
@@ -52,11 +54,31 @@ Password auth and public-key auth are supported. You can use one or both.
 ```yaml
 users:
   - username: backup
-    password: changeme
+    password_hash: "$2a$12$..."
     authorized_keys:
       - /home/backup/.ssh/authorized_keys
       - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... backup@example
 ```
+
+Generate a bcrypt hash with:
+
+```bash
+sftp2s3 -hash-password
+```
+
+Paste the output into `password_hash`. Plaintext `password` is still accepted for backwards compatibility, but `password_hash` is strongly recommended.
+
+## Host keys
+
+By default sftp2s3 generates an Ed25519 host key at `host_ed25519_key` on first startup. You can switch to RSA:
+
+```yaml
+server:
+  host_key: host_rsa_key
+  host_key_type: rsa
+```
+
+When an RSA key is used, the legacy SHA-1 `ssh-rsa` algorithm is disabled; only `rsa-sha2-256` and `rsa-sha2-512` are available.
 
 ## Per-user backend restrictions
 
@@ -115,7 +137,7 @@ Cross-backend renames additionally require `read` on the source backend because 
 
 ## Per-user connection and rate limits
 
-You can cap concurrent SFTP sessions per user and throttle their transfer speed:
+You can cap concurrent SFTP sessions per user, throttle their transfer speed, and limit request sizes:
 
 ```yaml
 users:
@@ -123,10 +145,23 @@ users:
     password: changeme
     max_connections: 5
     rate_limit_bytes_per_sec: 1048576
+    max_file_size: 1073741824
+    max_read_size: 134217728
 ```
 
 - `max_connections` — rejects new sessions once the limit is reached.
-- `rate_limit_bytes_per_sec` — token-bucket throttle applied to reads and writes for that user.
+- `rate_limit_bytes_per_sec` — global token-bucket throttle applied to the user's reads and writes across all of their connections.
+- `max_file_size` — rejects SFTP writes that would grow a file beyond this size.
+- `max_read_size` — rejects SFTP reads that request more than this many bytes at once.
+
+Server-wide defaults for `max_file_size` and `max_read_size` can be set under `server:`. Per-user values override the server defaults.
+
+You can also cap the rate at which new TCP connections are accepted before the SSH handshake, protecting the server from handshake resource exhaustion:
+
+```yaml
+server:
+  max_connections_per_second: 100
+```
 
 ## Backend timeouts
 
@@ -137,6 +172,20 @@ backends:
   - name: primary
     timeout: 60s
 ```
+
+## Backend endpoints and path style
+
+For S3-compatible services that require bucket names in the URL path (e.g. Cloudflare R2, MinIO, some on-prem solutions), enable path-style requests:
+
+```yaml
+backends:
+  - name: r2
+    endpoint_url: https://<accountid>.r2.cloudflarestorage.com
+    bucket: mybucket
+    use_path_style: true
+```
+
+`sftp2s3` also accepts `path_style` as an alias for `use_path_style`.
 
 ## Startup validation
 
@@ -158,13 +207,16 @@ If `metrics_addr` is set, sftp2s3 exposes Prometheus metrics and a health endpoi
 
 ```yaml
 server:
-  metrics_addr: :2112
+  metrics_addr: 127.0.0.1:2112
+  # metrics_token: changeme       # require Authorization: Bearer <token> for /metrics
+  # metrics_cert_file: /path/to/tls.crt
+  # metrics_key_file: /path/to/tls.key
 ```
 
 Available endpoints:
 
-- `http://:2112/metrics` — Prometheus metrics
-- `http://:2112/healthz` — health check
+- `/metrics` — Prometheus metrics (optional bearer-token auth and TLS)
+- `/healthz` — health check (always public)
 
 Metrics include:
 
@@ -199,6 +251,17 @@ users:
   - username: site1
     password: changeme
     prefix: site1
+```
+
+To use a different chroot per backend, use `backend_prefixes`. A `"*"` entry is the default for any backend not explicitly listed.
+
+```yaml
+users:
+  - username: site1
+    password: changeme
+    backend_prefixes:
+      "*": site1
+      r2-eu: site2
 ```
 
 ## Auth failure tarpit
@@ -251,16 +314,17 @@ Check the version with:
 
 ## Running with Docker
 
-Build and run with a mounted config:
+Build and run with a mounted config and persistent host key:
 
 ```bash
 docker build -t sftp2s3 .
 docker run -p 2222:2222 -p 2112:2112 \
   -v $(pwd)/config.yaml:/etc/sftp2s3/config.yaml:ro \
+  -v $(pwd)/host_ed25519_key:/var/lib/sftp2s3/host_ed25519_key:ro \
   sftp2s3
 ```
 
-The image uses an unprivileged `sftp2s3` user and exposes ports `2222` (SFTP) and `2112` (metrics/health).
+The image does not include a default config or users; you must supply a `config.yaml`. The default host key type is Ed25519 (`host_ed25519_key`); set `host_key_type: rsa` to use RSA.
 
 ## Running with systemd
 

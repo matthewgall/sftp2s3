@@ -21,11 +21,10 @@ RUN apk add --no-cache ca-certificates && \
 WORKDIR /var/lib/sftp2s3
 
 COPY --from=builder /src/sftp2s3 /usr/local/bin/sftp2s3
-COPY --from=builder /src/config.example.yaml /etc/sftp2s3/config.yaml
 
 USER sftp2s3
 
 EXPOSE 2222 2112
 
 ENTRYPOINT ["/usr/local/bin/sftp2s3"]
-CMD ["-c", "/etc/sftp2s3/config.yaml"]
+CMD []

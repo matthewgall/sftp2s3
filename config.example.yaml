@@ -1,13 +1,20 @@
 server:
   host: 0.0.0.0
   port: 2222
-  host_key: host_rsa_key
+  host_key: host_ed25519_key
+  host_key_type: ed25519  # or rsa
   log_level: info        # debug, info, warn, error
   log_format: text       # text or json
   shutdown_timeout: 30s  # how long to wait for SFTP sessions on shutdown
-  metrics_addr: :2112    # Prometheus /metrics and /healthz endpoint
+  metrics_addr: 127.0.0.1:2112    # Prometheus /metrics and /healthz endpoint
+  # metrics_token: changeme       # require Authorization: Bearer <token> for /metrics
+  # metrics_cert_file: /path/to/tls.crt
+  # metrics_key_file: /path/to/tls.key
   cache_dir: /var/cache/sftp2s3  # general cache directory (used by sshid.io keys)
   backend_health_interval: 30s  # periodic backend health checks; set to 0 to disable
+  # max_file_size: 1073741824     # global default max upload size in bytes (per-user overrides)
+  # max_read_size: 134217728      # global default max SFTP read size in bytes (per-user overrides)
+  # max_connections_per_second: 100  # cap new TCP accepts before SSH handshake
   auth_failures:
     max_attempts: 5
     window: 5m
@@ -17,34 +24,45 @@ server:
     save_interval: 1m
 
 users:
-  - username: backup
-    password: changeme
-    # Omit backends to allow all. List names to restrict.
-    # backends:
-    #   - primary
-    # prefix chroots the user under each backend root (hidden from the user).
-    # prefix: site1
-    # authorized_keys accepts key strings or file paths.
-    # authorized_keys:
-    #   - /home/backup/.ssh/authorized_keys
-    #   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... backup@example
-    # permissions restricts the operations this user may perform.
-    # Omit the field (or leave it empty) to grant read, write, and delete.
-    # permissions:
-    #   - read
-    #   - write
-    #   - delete
-    # sshid fetches and caches public keys from https://sshid.io/username
-    # sshid:
-    #   username: matthewgall
-    #   # algorithms is optional and limits which key types to accept.
-    #   # algorithms:
-    #   #   - ed25519
-    #   #   - ecdsa
-    #   #   - rsa
-    #   cache_dir: /var/cache/sftp2s3/sshid
-    # max_connections: 5
-    # rate_limit_bytes_per_sec: 1048576
+  # Example user. Uncomment and configure at least one user before starting.
+  # - username: backup
+  #   # Use password_hash (bcrypt) or password (plaintext, not recommended).
+  #   # Generate a hash with: sftp2s3 -hash-password
+  #   password_hash: "$2a$12$..."
+  #   # Omit backends to allow all. List names to restrict.
+  #   backends:
+  #     - primary
+  #   # prefix chroots the user under every backend root (hidden from the user).
+  #   # prefix: site1
+  #   # backend_prefixes applies a different chroot per backend. A "*" entry is
+  #   # the default for backends not explicitly listed. If both are set,
+  #   # backend_prefixes takes precedence.
+  #   # backend_prefixes:
+  #   #   "*": site1
+  #   #   r2-eu: site2
+  #   # authorized_keys accepts key strings or file paths.
+  #   # authorized_keys:
+  #   #   - /home/backup/.ssh/authorized_keys
+  #   #   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... backup@example
+  #   # permissions restricts the operations this user may perform.
+  #   # Omit the field (or leave it empty) to grant read, write, and delete.
+  #   permissions:
+  #     - read
+  #     - write
+  #     - delete
+  #   # sshid fetches and caches public keys from https://sshid.io/username
+  #   sshid:
+  #     username: matthewgall
+  #     # algorithms is optional and limits which key types to accept.
+  #     # algorithms:
+  #     #   - ed25519
+  #     #   - ecdsa
+  #     #   - rsa
+  #     cache_dir: /var/cache/sftp2s3/sshid
+  #   max_connections: 5
+  #   rate_limit_bytes_per_sec: 1048576
+  #   max_file_size: 1073741824
+  #   max_read_size: 134217728
 
 backends:
   - name: primary
