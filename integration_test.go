@@ -68,7 +68,7 @@ func TestSFTPIntegration(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runServer(ctx, listener, 5*time.Second, currentState, newUserConnLimiter(nil))
+		errCh <- runServer(ctx, listener, 5*time.Second, currentState, newUserConnLimiter(nil), newUserRateRegistry(nil), nil)
 	}()
 
 	clientConn, err := net.Dial("tcp", listener.Addr().String())

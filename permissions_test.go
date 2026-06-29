@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/pkg/sftp"
@@ -53,7 +54,7 @@ func TestHandlersReadOnlyDenied(t *testing.T) {
 	vfs := &VFS{Backends: map[string]*Backend{b.Name: b}}
 	readOnly := parsePermissions([]string{"read"})
 
-	hCmd := NewS3Handlers(vfs, "u", "127.0.0.1", readOnly, nil, nil).FileCmd.(*S3Handlers)
+	hCmd := NewS3Handlers(context.Background(), vfs, "u", "127.0.0.1", readOnly, nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 	if err := hCmd.Filecmd(&sftp.Request{Filepath: "/mock/file.bin", Method: "Remove"}); err != sftp.ErrSSHFxPermissionDenied {
 		t.Fatalf("remove without delete: got %v", err)
 	}
@@ -64,12 +65,12 @@ func TestHandlersReadOnlyDenied(t *testing.T) {
 		t.Fatalf("rename without write/delete: got %v", err)
 	}
 
-	hPut := NewS3Handlers(vfs, "u", "127.0.0.1", readOnly, nil, nil).FilePut.(*S3Handlers)
+	hPut := NewS3Handlers(context.Background(), vfs, "u", "127.0.0.1", readOnly, nil, 0, 0, "", nil).FilePut.(*S3Handlers)
 	if _, err := hPut.Filewrite(&sftp.Request{Filepath: "/mock/file.bin", Method: "Put"}); err != sftp.ErrSSHFxPermissionDenied {
 		t.Fatalf("write without write perm: got %v", err)
 	}
 
-	hList := NewS3Handlers(vfs, "u", "127.0.0.1", readOnly, nil, nil).FileList.(*S3Handlers)
+	hList := NewS3Handlers(context.Background(), vfs, "u", "127.0.0.1", readOnly, nil, 0, 0, "", nil).FileList.(*S3Handlers)
 	if _, err := hList.Filelist(&sftp.Request{Filepath: "/mock", Method: "List"}); err != nil {
 		t.Fatalf("list with read perm should succeed: got %v", err)
 	}
@@ -80,7 +81,7 @@ func TestHandlersWriteOnlyDenied(t *testing.T) {
 	vfs := &VFS{Backends: map[string]*Backend{b.Name: b}}
 	writeOnly := parsePermissions([]string{"write"})
 
-	hList := NewS3Handlers(vfs, "u", "127.0.0.1", writeOnly, nil, nil).FileList.(*S3Handlers)
+	hList := NewS3Handlers(context.Background(), vfs, "u", "127.0.0.1", writeOnly, nil, 0, 0, "", nil).FileList.(*S3Handlers)
 	if _, err := hList.Filelist(&sftp.Request{Filepath: "/mock", Method: "List"}); err != sftp.ErrSSHFxPermissionDenied {
 		t.Fatalf("list without read: got %v", err)
 	}
