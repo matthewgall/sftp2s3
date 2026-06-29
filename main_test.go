@@ -279,6 +279,18 @@ func TestBuildServerStateSSHConfigError(t *testing.T) {
 	}
 }
 
+func TestRequireRecklessEnv(t *testing.T) {
+	name := "SFTP2S3_TEST_RECKLESS_ENV"
+	t.Setenv(name, "")
+	if err := requireRecklessEnv(name); err == nil {
+		t.Fatal("expected error when env var is missing")
+	}
+	t.Setenv(name, "yes")
+	if err := requireRecklessEnv(name); err != nil {
+		t.Fatalf("expected no error when env var is set: %v", err)
+	}
+}
+
 func TestInitLogger(t *testing.T) {
 	tests := []struct {
 		level  string

@@ -68,6 +68,8 @@ sftp2s3 -hash-password
 
 Paste the output into `password_hash`. Plaintext `password` is still accepted for backwards compatibility, but `password_hash` is strongly recommended.
 
+> **Emergency debugging:** If you need to see exactly what password an SFTP client is sending, `sftp2s3` has an `--insecure-log-passwords` flag. It requires the environment variable `SFTP2S3_I_AM_RECKLESSLY_LEAKING_PASSWORDS` to be set and should be removed immediately after debugging.
+
 ## Host keys
 
 By default sftp2s3 generates an Ed25519 host key at `host_ed25519_key` on first startup. You can switch to RSA:

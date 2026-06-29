@@ -18,6 +18,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// requireRecklessEnv returns an error if the named acknowledgement env var is
+// not set. It is used to make enabling --insecure-log-passwords a deliberate
+// two-step action.
+func requireRecklessEnv(name string) error {
+	if os.Getenv(name) == "" {
+		return fmt.Errorf("set %s to acknowledge you are intentionally leaking passwords", name)
+	}
+	return nil
+}
+
 // initLogger creates a structured logger using the requested level and format.
 func initLogger(level, format string) *slog.Logger {
 	var lvl slog.Level
@@ -105,7 +115,12 @@ func main() {
 	flag.Parse()
 
 	if insecureLogPasswords {
-		fmt.Fprintln(os.Stderr, "WARNING: --insecure-log-passwords is enabled. Passwords will be printed in plaintext. Remove this flag immediately after debugging.")
+		const recklessEnv = "SFTP2S3_I_AM_RECKLESSLY_LEAKING_PASSWORDS"
+		if err := requireRecklessEnv(recklessEnv); err != nil {
+			slog.Error("refusing to start with --insecure-log-passwords", "error", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "WARNING: --insecure-log-passwords is enabled. Passwords will be printed in plaintext. Remove this flag immediately after debugging.\n")
 		setInsecureLogPasswords(true)
 	}
 
