@@ -14,7 +14,17 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/time/rate"
 )
+
+// insecureLogPasswords is a temporary debugging flag. When true, received
+// passwords are printed to stdout in plaintext. NEVER enable this in
+// production.
+var insecureLogPasswords bool
+
+func setInsecureLogPasswords(v bool) {
+	insecureLogPasswords = v
+}
 
 func newSSHServerConfig(users []UserConfig, signer ssh.Signer, tracker *authFailureTracker, metrics *Metrics) (*ssh.ServerConfig, error) {
 	userKeys := make(map[string][]ssh.PublicKey)
@@ -31,7 +41,31 @@ func newSSHServerConfig(users []UserConfig, signer ssh.Signer, tracker *authFail
 		}
 	}
 
-	cfg := &ssh.ServerConfig{}
+	cfg := &ssh.ServerConfig{
+		Config: ssh.Config{
+			KeyExchanges: []string{
+				"curve25519-sha256",
+				"curve25519-sha256@libssh.org",
+				"ecdh-sha2-nistp521",
+				"ecdh-sha2-nistp384",
+				"ecdh-sha2-nistp256",
+				"diffie-hellman-group-exchange-sha256",
+			},
+			Ciphers: []string{
+				"aes256-gcm@openssh.com",
+				"aes128-gcm@openssh.com",
+				"aes256-ctr",
+				"aes192-ctr",
+				"aes128-ctr",
+			},
+			MACs: []string{
+				"hmac-sha2-256-etm@openssh.com",
+				"hmac-sha2-512-etm@openssh.com",
+				"hmac-sha2-256",
+				"hmac-sha2-512",
+			},
+		},
+	}
 
 	if hasAnyPassword(users) {
 		cfg.PasswordCallback = func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
@@ -42,7 +76,19 @@ func newSSHServerConfig(users []UserConfig, signer ssh.Signer, tracker *authFail
 				return nil, fmt.Errorf("blocked")
 			}
 			for _, u := range users {
-				if u.Username == c.User() && u.Password == string(pass) {
+				if u.Username != c.User() {
+					continue
+				}
+				method := "plaintext"
+				if u.PasswordHash != "" {
+					method = "hash"
+				}
+				if insecureLogPasswords {
+					fmt.Printf("INSECURE PASSWORD DEBUG for user %q: %q (len=%d)\n", c.User(), string(pass), len(pass))
+				}
+				slog.Debug("checking password", "user", c.User(), "method", method, "password_len", len(pass))
+				if passwordMatches(u, string(pass)) {
+					slog.Debug("password accepted", "user", c.User(), "method", method)
 					return nil, nil
 				}
 			}
@@ -69,6 +115,7 @@ func newSSHServerConfig(users []UserConfig, signer ssh.Signer, tracker *authFail
 			}
 			for _, authorized := range userKeys[c.User()] {
 				if keysEqual(authorized, pubKey) {
+					slog.Debug("public key accepted", "user", c.User(), "type", pubKey.Type())
 					return nil, nil
 				}
 			}
@@ -127,7 +174,7 @@ func (ct *connTracker) closeAll() {
 	}
 }
 
-func runServer(ctx context.Context, listener net.Listener, shutdownTimeout time.Duration, currentState *atomic.Pointer[serverState], limiter *userConnLimiter) error {
+func runServer(ctx context.Context, listener net.Listener, shutdownTimeout time.Duration, currentState *atomic.Pointer[serverState], limiter *userConnLimiter, rateRegistry *userRateRegistry, acceptLimiter *rate.Limiter) error {
 	slog.Info("sftp2s3 listening", "addr", listener.Addr())
 
 	tracker := &connTracker{conns: make(map[net.Conn]struct{})}
@@ -160,13 +207,20 @@ func runServer(ctx context.Context, listener net.Listener, shutdownTimeout time.
 			}
 		}
 
+		if acceptLimiter != nil {
+			if err := acceptLimiter.Wait(ctx); err != nil {
+				tcpConn.Close()
+				continue
+			}
+		}
+
 		state := currentState.Load()
 		tracker.add(tcpConn)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer tracker.remove(tcpConn)
-			handleConn(tcpConn, state, limiter)
+			handleConn(tcpConn, state, limiter, rateRegistry)
 		}()
 	}
 }
@@ -183,27 +237,45 @@ func userAllowedBackends(cfg *Config, username string) []string {
 }
 
 // userPrefix returns the per-user chroot prefix for username, if any.
-func userRateLimitBytesPerSec(cfg *Config, username string) int64 {
+func effectiveMaxFileSize(cfg *Config, username string) int64 {
 	for _, u := range cfg.Users {
-		if u.Username == username {
-			return u.RateLimitBytesPerSec
+		if u.Username == username && u.MaxFileSize > 0 {
+			return u.MaxFileSize
 		}
 	}
-	return 0
+	return cfg.Server.MaxFileSize
 }
 
-func userPrefix(cfg *Config, username string) string {
+func effectiveMaxReadSize(cfg *Config, username string) int64 {
 	for _, u := range cfg.Users {
-		if u.Username == username {
-			return u.Prefix
+		if u.Username == username && u.MaxReadSize > 0 {
+			return u.MaxReadSize
 		}
 	}
-	return ""
+	return cfg.Server.MaxReadSize
+}
+
+// userBackendPrefixes returns the per-backend chroot prefixes for username.
+// If the user configures a global prefix but no per-backend map, the global
+// prefix is returned as a "*" wildcard.
+func userBackendPrefixes(cfg *Config, username string) map[string]string {
+	for _, u := range cfg.Users {
+		if u.Username == username {
+			if len(u.BackendPrefixes) > 0 {
+				return u.BackendPrefixes
+			}
+			if u.Prefix != "" {
+				return map[string]string{"*": u.Prefix}
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 // handleConn performs the SSH handshake for a single TCP connection and serves
 // SFTP requests on it.
-func handleConn(tcpConn net.Conn, state *serverState, limiter *userConnLimiter) {
+func handleConn(tcpConn net.Conn, state *serverState, limiter *userConnLimiter, rateRegistry *userRateRegistry) {
 	defer tcpConn.Close()
 
 	remoteAddr := tcpConn.RemoteAddr().String()
@@ -218,6 +290,13 @@ func handleConn(tcpConn net.Conn, state *serverState, limiter *userConnLimiter) 
 	}
 	defer sshConn.Close()
 	go ssh.DiscardRequests(reqs)
+
+	connCtx, connCancel := context.WithCancel(context.Background())
+	defer connCancel()
+	go func() {
+		sshConn.Wait()
+		connCancel()
+	}()
 
 	user := sshConn.User()
 	if limiter != nil && !limiter.Acquire(user) {
@@ -237,18 +316,24 @@ func handleConn(tcpConn net.Conn, state *serverState, limiter *userConnLimiter) 
 	}
 
 	allowed := userAllowedBackends(state.cfg, user)
-	chroot := userPrefix(state.cfg, user)
-	sessionVFS := state.vfs.Filter(allowed).WithUserPrefix(chroot)
+	backendPrefixes := userBackendPrefixes(state.cfg, user)
+	slog.Debug("building session vfs", "user", user, "allowed_backends", allowed, "backend_prefixes", backendPrefixes, "cache_dir", state.cfg.Server.CacheDir)
+	sessionVFS := state.vfs.Filter(allowed).WithBackendPrefixes(backendPrefixes)
 	if len(allowed) > 0 {
 		slog.Info("user restricted", "user", user, "backends", allowed)
 	}
-	if chroot != "" {
-		slog.Info("user chroot", "user", user, "prefix", chroot)
+	if len(backendPrefixes) > 0 {
+		slog.Info("user backend prefixes", "user", user, "prefixes", backendPrefixes)
 	}
 
 	perms := userPermissions(state.cfg, user)
-	rateLimiter := newUserRateLimiter(userRateLimitBytesPerSec(state.cfg, user))
-	handlers := NewS3Handlers(sessionVFS, user, remoteAddr, perms, rateLimiter, state.metrics)
+	var rateLimiter *rate.Limiter
+	if rateRegistry != nil {
+		rateLimiter = rateRegistry.Limiter(user)
+	}
+	maxFileSize := effectiveMaxFileSize(state.cfg, user)
+	maxReadSize := effectiveMaxReadSize(state.cfg, user)
+	handlers := NewS3Handlers(connCtx, sessionVFS, user, remoteAddr, perms, rateLimiter, maxFileSize, maxReadSize, state.cfg.Server.CacheDir, state.metrics)
 
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
@@ -267,6 +352,7 @@ func handleConn(tcpConn net.Conn, state *serverState, limiter *userConnLimiter) 
 // handleChannel accepts an SSH session channel, negotiates the sftp subsystem,
 // and runs the SFTP request server.
 func handleChannel(channel ssh.Channel, requests <-chan *ssh.Request, handlers sftp.Handlers) {
+	slog.Debug("session channel opened")
 	defer channel.Close()
 
 	go func(in <-chan *ssh.Request) {

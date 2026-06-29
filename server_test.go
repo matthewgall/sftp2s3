@@ -34,21 +34,27 @@ func TestUserAllowedBackends(t *testing.T) {
 	}
 }
 
-func TestUserPrefix(t *testing.T) {
+func TestUserBackendPrefixes(t *testing.T) {
 	cfg := &Config{
 		Users: []UserConfig{
 			{Username: "alice", Prefix: "site1"},
-			{Username: "bob"},
+			{Username: "bob", BackendPrefixes: map[string]string{"r2": "site2"}},
+			{Username: "carol"},
 		},
 	}
-	if got := userPrefix(cfg, "alice"); got != "site1" {
-		t.Fatalf("alice prefix=%q, want site1", got)
+	alice := userBackendPrefixes(cfg, "alice")
+	if got := alice["*"]; got != "site1" {
+		t.Fatalf("alice wildcard prefix=%q, want site1", got)
 	}
-	if got := userPrefix(cfg, "bob"); got != "" {
-		t.Fatalf("bob prefix=%q, want empty", got)
+	bob := userBackendPrefixes(cfg, "bob")
+	if got := bob["r2"]; got != "site2" {
+		t.Fatalf("bob r2 prefix=%q, want site2", got)
 	}
-	if got := userPrefix(cfg, "unknown"); got != "" {
-		t.Fatalf("unknown prefix=%q, want empty", got)
+	if userBackendPrefixes(cfg, "carol") != nil {
+		t.Fatal("expected nil for carol")
+	}
+	if userBackendPrefixes(cfg, "unknown") != nil {
+		t.Fatal("expected nil for unknown")
 	}
 }
 
@@ -232,7 +238,7 @@ func TestLoadOrGenerateHostKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "host_key")
 
-	signer, err := loadOrGenerateHostKey(path)
+	signer, err := loadOrGenerateHostKey(path, "ed25519")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -248,7 +254,7 @@ func TestLoadOrGenerateHostKey(t *testing.T) {
 		t.Fatalf("expected 0600, got %o", info.Mode().Perm())
 	}
 
-	signer2, err := loadOrGenerateHostKey(path)
+	signer2, err := loadOrGenerateHostKey(path, "ed25519")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
