@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -221,8 +222,9 @@ func resolveEnv(name, mod, arg string) (string, error) {
 	return val, nil
 }
 
-// isValidBcryptHash reports whether s looks like a bcrypt hash. bcrypt hashes
-// are 60 characters long and start with $2a$, $2b$, or $2y$.
+// isValidBcryptHash reports whether s is a well-formed bcrypt hash. bcrypt
+// hashes are 60 characters long, start with $2a$, $2b$, or $2y$, and parse
+// successfully with bcrypt.Cost.
 func isValidBcryptHash(s string) bool {
 	if len(s) != 60 {
 		return false
@@ -235,7 +237,8 @@ func isValidBcryptHash(s string) bool {
 	}
 	switch s[2] {
 	case 'a', 'b', 'y':
-		return true
+		_, err := bcrypt.Cost([]byte(s))
+		return err == nil
 	}
 	return false
 }

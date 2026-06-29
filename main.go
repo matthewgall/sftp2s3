@@ -105,11 +105,13 @@ func main() {
 	var configPath string
 	var showVersion bool
 	var hashPassword bool
+	var hashPasswordOutput string
 	var verifyPassword string
 	var insecureLogPasswords bool
 	flag.StringVar(&configPath, "c", "config.yaml", "path to config file")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&hashPassword, "hash-password", false, "read a password from stdin and print a bcrypt hash")
+	flag.BoolVar(&hashPassword, "hash-password", false, "read a password from stdin and write a bcrypt hash to a file")
+	flag.StringVar(&hashPasswordOutput, "hash-password-output", "", "output file for -hash-password (default sftp2s3.hash, use - for stdout)")
 	flag.StringVar(&verifyPassword, "verify-password", "", "read a password from stdin and verify it against the provided bcrypt hash")
 	flag.BoolVar(&insecureLogPasswords, "insecure-log-passwords", false, "INSECURE: log received plaintext passwords to stdout for debugging")
 	flag.Parse()
@@ -130,7 +132,10 @@ func main() {
 	}
 
 	if hashPassword {
-		if err := runHashPassword(); err != nil {
+		if hashPasswordOutput == "" {
+			hashPasswordOutput = "sftp2s3.hash"
+		}
+		if err := runHashPassword(hashPasswordOutput); err != nil {
 			slog.Error("hash password failed", "error", err)
 			os.Exit(1)
 		}

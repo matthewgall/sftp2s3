@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,8 +82,7 @@ func TestRunVerifyPassword(t *testing.T) {
 
 func TestRunHashPassword(t *testing.T) {
 	oldStdin := os.Stdin
-	oldStdout := os.Stdout
-	defer func() { os.Stdin = oldStdin; os.Stdout = oldStdout }()
+	defer func() { os.Stdin = oldStdin }()
 
 	r, w, _ := os.Pipe()
 	os.Stdin = r
@@ -91,23 +91,47 @@ func TestRunHashPassword(t *testing.T) {
 		_ = w.Close()
 	}()
 
-	outR, outW, _ := os.Pipe()
-	os.Stdout = outW
-
-	if err := runHashPassword(); err != nil {
+	outFile := filepath.Join(t.TempDir(), "hash.txt")
+	if err := runHashPassword(outFile); err != nil {
 		t.Fatalf("runHashPassword: %v", err)
 	}
-	_ = outW.Close()
 
-	buf, _ := io.ReadAll(outR)
-	hash := strings.TrimSpace(string(buf))
-	if hash == "" {
+	hash, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashStr := strings.TrimSpace(string(hash))
+	if hashStr == "" {
 		t.Fatal("expected hash output")
 	}
-	if !bytes.HasPrefix([]byte(hash), []byte("$2a$")) {
-		t.Fatalf("expected bcrypt hash, got %q", hash)
+	if !bytes.HasPrefix([]byte(hashStr), []byte("$2a$")) {
+		t.Fatalf("expected bcrypt hash, got %q", hashStr)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte("testpass")); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(hashStr), []byte("testpass")); err != nil {
 		t.Fatalf("generated hash does not verify: %v", err)
+	}
+}
+
+func TestRunHashPasswordStdout(t *testing.T) {
+	oldStdin := os.Stdin
+	oldStdout := os.Stdout
+	defer func() { os.Stdin = oldStdin; os.Stdout = oldStdout }()
+
+	r, w, _ := os.Pipe()
+	os.Stdin = r
+	go func() {
+		_, _ = w.WriteString("stdoutpass\n")
+		_ = w.Close()
+	}()
+
+	outR, outW, _ := os.Pipe()
+	os.Stdout = outW
+	if err := runHashPassword("-"); err != nil {
+		t.Fatalf("runHashPassword stdout: %v", err)
+	}
+	_ = outW.Close()
+	buf, _ := io.ReadAll(outR)
+	if !bytes.HasPrefix(bytes.TrimSpace(buf), []byte("$2a$")) {
+		t.Fatalf("expected bcrypt hash on stdout, got %q", buf)
 	}
 }

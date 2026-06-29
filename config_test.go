@@ -344,6 +344,7 @@ func TestIsValidBcryptHash(t *testing.T) {
 		{"$2y$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u", true},
 		{"$2x$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u", false},
 		{"$2a$10$truncated", false},
+		{"$2a$99$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", false},
 		{"not-a-hash", false},
 		{"", false},
 	}

@@ -37,8 +37,10 @@ func readPassword(prompt string) (string, error) {
 	return strings.TrimSpace(line), err
 }
 
-// runHashPassword reads a password from stdin and prints a bcrypt hash.
-func runHashPassword() error {
+// runHashPassword reads a password from stdin and writes a bcrypt hash to the
+// requested destination. A path of "-" writes to stdout; anything else is
+// written to a file with 0600 permissions.
+func runHashPassword(outputPath string) error {
 	password, err := readPassword("Enter password: ")
 	if err != nil {
 		return err
@@ -50,7 +52,14 @@ func runHashPassword() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(hash))
+	if outputPath == "-" {
+		fmt.Println(string(hash))
+		return nil
+	}
+	if err := os.WriteFile(outputPath, hash, 0600); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Hash written to %s\n", outputPath)
 	return nil
 }
 
