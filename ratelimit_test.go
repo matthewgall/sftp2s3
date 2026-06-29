@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestUserConnLimiter(t *testing.T) {
@@ -55,6 +56,77 @@ func TestRateLimitedReaderPassesData(t *testing.T) {
 	}
 	if string(buf) != "hello world" {
 		t.Fatalf("got %q, want %q", buf, "hello world")
+	}
+}
+
+func TestUserRateRegistrySharedLimiter(t *testing.T) {
+	users := []UserConfig{
+		{Username: "alice", RateLimitBytesPerSec: 1024},
+		{Username: "bob"},
+	}
+	r := newUserRateRegistry(users)
+
+	lim1 := r.Limiter("alice")
+	lim2 := r.Limiter("alice")
+	if lim1 == nil || lim1 != lim2 {
+		t.Fatal("expected a single shared limiter for alice")
+	}
+	if r.Limiter("bob") != nil {
+		t.Fatal("expected no limiter for bob")
+	}
+}
+
+func TestUserRateRegistryUpdate(t *testing.T) {
+	users := []UserConfig{{Username: "alice", RateLimitBytesPerSec: 1024}}
+	r := newUserRateRegistry(users)
+	lim := r.Limiter("alice")
+
+	r.Update([]UserConfig{{Username: "alice", RateLimitBytesPerSec: 2048}})
+	if lim.Limit() != 2048 {
+		t.Fatalf("expected limit to update to 2048, got %v", lim.Limit())
+	}
+
+	r.Update(nil)
+	if r.Limiter("alice") != nil {
+		t.Fatal("expected limiter to be removed when config cleared")
+	}
+}
+
+func TestNewUserRateLimiter(t *testing.T) {
+	if lim := newUserRateLimiter(0); lim != nil {
+		t.Fatal("expected nil limiter for 0")
+	}
+	if lim := newUserRateLimiter(-1); lim != nil {
+		t.Fatal("expected nil limiter for negative")
+	}
+	lim := newUserRateLimiter(1024)
+	if lim.Limit() != 1024 {
+		t.Fatalf("expected limit 1024, got %v", lim.Limit())
+	}
+	if lim.Burst() < 64*1024 {
+		t.Fatalf("expected burst at least 64KiB, got %v", lim.Burst())
+	}
+}
+
+func TestMaxDuration(t *testing.T) {
+	if maxDuration(1*time.Second, 2*time.Second) != 2*time.Second {
+		t.Fatal("expected max duration to be 2s")
+	}
+	if maxDuration(3*time.Second, 1*time.Second) != 3*time.Second {
+		t.Fatal("expected max duration to be 3s")
+	}
+}
+
+func TestNewAcceptRateLimiter(t *testing.T) {
+	if lim := newAcceptRateLimiter(0); lim != nil {
+		t.Fatal("expected nil limiter for 0")
+	}
+	if lim := newAcceptRateLimiter(-1); lim != nil {
+		t.Fatal("expected nil limiter for negative")
+	}
+	lim := newAcceptRateLimiter(10)
+	if lim.Limit() != 10 {
+		t.Fatalf("expected limit 10, got %v", lim.Limit())
 	}
 }
 
