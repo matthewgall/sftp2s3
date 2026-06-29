@@ -98,7 +98,7 @@ func NewVFS(configs []BackendConfig) (*VFS, error) {
 			if bc.EndpointURL != "" {
 				o.BaseEndpoint = &bc.EndpointURL
 			}
-			o.UsePathStyle = bc.UsePathStyle
+			o.UsePathStyle = bc.UsePathStyle || bc.PathStyleLegacy
 		})
 
 		uploader := manager.NewUploader(client, func(u *manager.Uploader) {
@@ -119,6 +119,7 @@ func NewVFS(configs []BackendConfig) (*VFS, error) {
 			PartSize: bc.PartSize,
 			Timeout:  timeout,
 		}
+		slog.Debug("configured backend", "name", bc.Name, "bucket", bc.Bucket, "prefix", prefix, "path_style", bc.UsePathStyle || bc.PathStyleLegacy)
 	}
 	return vfs, nil
 }
@@ -149,12 +150,34 @@ func (vfs *VFS) WithUserPrefix(userPrefix string) *VFS {
 	if userPrefix == "" {
 		return vfs
 	}
-	userPrefix += "/"
+	return vfs.WithBackendPrefixes(map[string]string{"*": userPrefix})
+}
 
+// WithBackendPrefixes returns a new VFS where each backend's Prefix is
+// extended by the per-backend prefix from prefixes. A "*" entry is used as a
+// default for backends not explicitly listed. This lets a user be chrooted to
+// different prefixes on different backends.
+func (vfs *VFS) WithBackendPrefixes(prefixes map[string]string) *VFS {
+	if len(prefixes) == 0 {
+		return vfs
+	}
 	filtered := make(map[string]*Backend, len(vfs.Backends))
 	for name, b := range vfs.Backends {
+		p, ok := prefixes[name]
+		if !ok {
+			p = prefixes["*"]
+		}
+		if p == "" {
+			filtered[name] = b
+			continue
+		}
+		p = strings.Trim(p, "/")
+		if p == "" {
+			filtered[name] = b
+			continue
+		}
 		nb := *b
-		nb.Prefix = b.Prefix + userPrefix
+		nb.Prefix = b.Prefix + p + "/"
 		filtered[name] = &nb
 	}
 	return &VFS{Backends: filtered}

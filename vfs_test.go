@@ -169,6 +169,41 @@ func TestVFSWithUserPrefix(t *testing.T) {
 	}
 }
 
+func TestVFSWithBackendPrefixes(t *testing.T) {
+	vfs := makeTestVFS()
+	vfs.Backends["alpha"].Prefix = "router/"
+
+	chroot := vfs.WithBackendPrefixes(map[string]string{
+		"alpha": "site1",
+		"*":     "default",
+	})
+
+	if got := chroot.Backends["alpha"].Prefix; got != "router/site1/" {
+		t.Fatalf("alpha prefix=%q, want router/site1/", got)
+	}
+	if got := chroot.Backends["beta"].Prefix; got != "default/" {
+		t.Fatalf("beta prefix=%q, want default/", got)
+	}
+	if got := chroot.Backends["gamma"].Prefix; got != "default/" {
+		t.Fatalf("gamma prefix=%q, want default/", got)
+	}
+
+	// original should be unchanged
+	if vfs.Backends["alpha"].Prefix != "router/" {
+		t.Fatal("original vfs was mutated")
+	}
+}
+
+func TestVFSWithBackendPrefixesEmpty(t *testing.T) {
+	vfs := makeTestVFS()
+	if vfs.WithBackendPrefixes(nil) != vfs {
+		t.Fatal("nil prefixes should return original vfs")
+	}
+	if vfs.WithBackendPrefixes(map[string]string{}) != vfs {
+		t.Fatal("empty prefixes should return original vfs")
+	}
+}
+
 func TestVFSWithUserPrefixEmpty(t *testing.T) {
 	vfs := makeTestVFS()
 	if vfs.WithUserPrefix("") != vfs {
