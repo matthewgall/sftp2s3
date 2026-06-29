@@ -87,7 +87,7 @@ func TestStartMetricsServer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	checker := &fakeHealthChecker{healthy: true}
-	startMetricsServer(ctx, listener, checker)
+	startMetricsServer(ctx, listener, checker, "", "", "")
 
 	// Wait for the server to be ready.
 	baseURL := "http://" + listener.Addr().String()
@@ -128,4 +128,53 @@ func TestStartMetricsServer(t *testing.T) {
 	}
 
 	cancel()
+}
+
+func TestMetricsServerAuth(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startMetricsServer(ctx, listener, &fakeHealthChecker{healthy: true}, "secrettoken", "", "")
+
+	baseURL := "http://" + listener.Addr().String()
+	var ready bool
+	for i := 0; i < 50; i++ {
+		resp, err := http.Get(baseURL + "/healthz")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			ready = true
+			break
+		}
+		if err == nil {
+			resp.Body.Close()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("metrics server did not become ready")
+	}
+
+	resp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, baseURL+"/metrics", nil)
+	req.Header.Set("Authorization", "Bearer secrettoken")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with token, got %d", resp.StatusCode)
+	}
 }

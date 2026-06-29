@@ -135,9 +135,13 @@ type healthChecker interface {
 // startMetricsServer starts an HTTP server on listener that exposes /metrics.
 // It runs until ctx is done. If checker is non-nil, /healthz reflects backend
 // health.
-func startMetricsServer(ctx context.Context, listener net.Listener, checker healthChecker) {
+//
+// If metricsToken is non-empty, requests to /metrics must include an
+// Authorization: Bearer <token> header. If certFile and keyFile are provided,
+// the server uses TLS.
+func startMetricsServer(ctx context.Context, listener net.Listener, checker healthChecker, metricsToken, certFile, keyFile string) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", metricsAuthHandler(metricsToken, promhttp.Handler()))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if checker != nil && !checker.AllHealthy() {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -149,7 +153,10 @@ func startMetricsServer(ctx context.Context, listener net.Listener, checker heal
 	})
 
 	server := &http.Server{
-		Handler: mux,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -162,9 +169,32 @@ func startMetricsServer(ctx context.Context, listener net.Listener, checker heal
 	}()
 
 	go func() {
-		slog.Info("metrics server listening", "addr", listener.Addr())
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		slog.Info("metrics server listening", "addr", listener.Addr(), "tls", certFile != "" && keyFile != "")
+		var err error
+		if certFile != "" && keyFile != "" {
+			err = server.ServeTLS(listener, certFile, keyFile)
+		} else {
+			err = server.Serve(listener)
+		}
+		if err != nil && err != http.ErrServerClosed {
 			slog.Error("metrics server failed", "error", err)
 		}
 	}()
+}
+
+// metricsAuthHandler returns an http.Handler that enforces an optional bearer
+// token on the /metrics endpoint.
+func metricsAuthHandler(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	expected := "Bearer " + token
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != expected {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("unauthorized"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
