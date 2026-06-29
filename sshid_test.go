@@ -127,6 +127,29 @@ func TestSSHIDResolveNotFound(t *testing.T) {
 	}
 }
 
+func TestSSHIDWriteCacheError(t *testing.T) {
+	oldBase := sshidBaseURL
+	defer func() { sshidBaseURL = oldBase }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ssh-ed25519 AAAACACHED bob@example\n"))
+	}))
+	defer srv.Close()
+	sshidBaseURL = srv.URL
+
+	// Use a file as cacheDir so MkdirAll fails.
+	cacheDir := filepath.Join(t.TempDir(), "notadir")
+	if err := os.WriteFile(cacheDir, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := newSSHIDResolver(cacheDir)
+	_, err := resolver.Resolve(&SSHIDConfig{Username: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolveSSHIDKeysAppends(t *testing.T) {
 	oldBase := sshidBaseURL
 	defer func() { sshidBaseURL = oldBase }()
