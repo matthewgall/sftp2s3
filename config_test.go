@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -17,12 +18,6 @@ func TestEnvSubstitute(t *testing.T) {
 			name:  "no substitution",
 			input: "plain text",
 			want:  "plain text",
-		},
-		{
-			name:  "bare variable",
-			env:   map[string]string{"FOO": "bar"},
-			input: "$FOO",
-			want:  "bar",
 		},
 		{
 			name:  "braced variable",
@@ -56,7 +51,7 @@ func TestEnvSubstitute(t *testing.T) {
 			name:  "mixed text",
 			env:   map[string]string{"USER": "alice", "HOST": "box"},
 			input: "user=${USER} host=$HOST",
-			want:  "user=alice host=box",
+			want:  "user=alice host=$HOST",
 		},
 		{
 			name:  "unset variable becomes empty",
@@ -72,6 +67,11 @@ func TestEnvSubstitute(t *testing.T) {
 			name:  "unclosed brace is literal",
 			input: "${FOO",
 			want:  "${FOO",
+		},
+		{
+			name:  "bcrypt hash is preserved",
+			input: "password_hash: \"$2a$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u\"",
+			want:  "password_hash: \"$2a$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u\"",
 		},
 	}
 
@@ -99,6 +99,39 @@ func TestEnvSubstitute(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadConfigPathStyleAlias(t *testing.T) {
+	content := []byte(`
+server:
+  host: 127.0.0.1
+users:
+  - username: backup
+    password: secret
+backends:
+  - name: r2
+    bucket: b
+    access_key_id: k
+    secret_access_key: s
+    path_style: true
+`)
+	tmp, err := os.CreateTemp("", "sftp2s3-config-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+
+	cfg, err := loadConfig(tmp.Name())
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if !cfg.Backends[0].PathStyleLegacy {
+		t.Fatal("expected path_style alias to be parsed")
 	}
 }
 
@@ -185,6 +218,139 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 	_, err = loadConfig(tmp.Name())
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name: "no users",
+			content: `
+server:
+  host: 127.0.0.1
+backends:
+  - name: primary
+    bucket: b
+    access_key_id: k
+    secret_access_key: s
+`,
+			wantErr: "at least one user",
+		},
+		{
+			name: "user without credentials",
+			content: `
+server:
+  host: 127.0.0.1
+users:
+  - username: backup
+backends:
+  - name: primary
+    bucket: b
+    access_key_id: k
+    secret_access_key: s
+`,
+			wantErr: "at least one of password",
+		},
+		{
+			name: "invalid host_key_type",
+			content: `
+server:
+  host_key_type: dsa
+users:
+  - username: backup
+    password: secret
+backends:
+  - name: primary
+    bucket: b
+    access_key_id: k
+    secret_access_key: s
+`,
+			wantErr: "invalid host_key_type",
+		},
+		{
+			name: "truncated password_hash",
+			content: `
+server:
+  host: 127.0.0.1
+users:
+  - username: backup
+    password_hash: "$2a$10$truncated"
+backends:
+  - name: primary
+    bucket: b
+    access_key_id: k
+    secret_access_key: s
+`,
+			wantErr: "password_hash does not look like a valid bcrypt hash",
+		},
+		{
+			name: "valid password_hash",
+			content: `
+server:
+  host: 127.0.0.1
+users:
+  - username: backup
+    password_hash: "$2a$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u"
+backends:
+  - name: primary
+    bucket: b
+    access_key_id: k
+    secret_access_key: s
+`,
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp, err := os.CreateTemp("", "sftp2s3-config-*.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tmp.Name())
+			if _, err := tmp.WriteString(tt.content); err != nil {
+				t.Fatal(err)
+			}
+			tmp.Close()
+
+			_, err = loadConfig(tmp.Name())
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestIsValidBcryptHash(t *testing.T) {
+	tests := []struct {
+		hash string
+		want bool
+	}{
+		{"$2a$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u", true},
+		{"$2b$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u", true},
+		{"$2y$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u", true},
+		{"$2x$10$OHesdVg9R.GQVTaBzy.qS.hBkDE4P2li81yE.yk.F8Aj0XAvvbg5u", false},
+		{"$2a$10$truncated", false},
+		{"not-a-hash", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isValidBcryptHash(tt.hash); got != tt.want {
+			t.Fatalf("isValidBcryptHash(%q) = %v, want %v", tt.hash, got, tt.want)
+		}
 	}
 }
 
