@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/goleak"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestMain(m *testing.M) {
@@ -65,6 +68,26 @@ users:
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
+	state, err := buildServerState(cfg, NewMetrics(prometheus.NewRegistry()))
+	if err != nil {
+		t.Fatalf("build server state: %v", err)
+	}
+	if state == nil {
+		t.Fatal("expected non-nil state")
+	}
+}
+
+func TestBuildServerStateNoBackends(t *testing.T) {
+	cfg := &Config{}
+	cfg.Server.HostKey = filepath.Join(t.TempDir(), "host_key")
+	cfg.Server.HostKeyType = "ed25519"
+	cfg.Server.LogLevel = "info"
+	cfg.Server.LogFormat = "text"
+	cfg.Users = []UserConfig{{
+		Username: "alice",
+		Password: "secret",
+	}}
+
 	state, err := buildServerState(cfg, NewMetrics(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatalf("build server state: %v", err)
@@ -131,6 +154,103 @@ func TestBuildServerStateValidationError(t *testing.T) {
 	_, err := buildServerState(cfg, NewMetrics(prometheus.NewRegistry()))
 	if err == nil {
 		t.Fatal("expected backend validation error")
+	}
+}
+
+func TestBuildServerStateSSHIDError(t *testing.T) {
+	oldBase := sshidBaseURL
+	defer func() { sshidBaseURL = oldBase }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	sshidBaseURL = srv.URL
+
+	cfg := &Config{}
+	cfg.Server.HostKey = filepath.Join(t.TempDir(), "host_key")
+	cfg.Server.LogLevel = "info"
+	cfg.Server.LogFormat = "text"
+	cfg.Backends = []BackendConfig{{
+		Name:            "primary",
+		Bucket:          "bucket",
+		Region:          "us-east-1",
+		EndpointURL:     "http://s3mock",
+		UsePathStyle:    true,
+		AccessKeyID:     "ak",
+		SecretAccessKey: "sk",
+	}}
+	cfg.Users = []UserConfig{{
+		Username: "alice",
+		Password: "secret",
+		SSHID:    &SSHIDConfig{Username: "alice"},
+	}}
+
+	_, err := buildServerState(cfg, NewMetrics(prometheus.NewRegistry()))
+	if err == nil {
+		t.Fatal("expected sshid error")
+	}
+}
+
+func TestBuildServerStateSSHIDSuccess(t *testing.T) {
+	oldBase := sshidBaseURL
+	defer func() { sshidBaseURL = oldBase }()
+
+	// Generate a valid ed25519 key line for the mock sshid response.
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyLine := string(ssh.MarshalAuthorizedKey(signer.PublicKey()))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("list-type") == "2" {
+			w.Header().Set("Content-Type", "application/xml")
+			w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>testbucket</Name>
+  <Prefix></Prefix>
+  <MaxKeys>1</MaxKeys>
+  <IsTruncated>false</IsTruncated>
+  <KeyCount>0</KeyCount>
+</ListBucketResult>`))
+			return
+		}
+		w.Write([]byte(keyLine))
+	}))
+	defer srv.Close()
+	sshidBaseURL = srv.URL
+
+	cfg := &Config{}
+	cfg.Server.HostKey = filepath.Join(t.TempDir(), "host_key")
+	cfg.Server.HostKeyType = "ed25519"
+	cfg.Server.LogLevel = "info"
+	cfg.Server.LogFormat = "text"
+	cfg.Backends = []BackendConfig{{
+		Name:            "primary",
+		Bucket:          "testbucket",
+		Region:          "us-east-1",
+		EndpointURL:     srv.URL,
+		UsePathStyle:    true,
+		AccessKeyID:     "ak",
+		SecretAccessKey: "sk",
+	}}
+	cfg.Users = []UserConfig{{
+		Username: "alice",
+		Password: "secret",
+		SSHID:    &SSHIDConfig{Username: "alice"},
+	}}
+
+	state, err := buildServerState(cfg, NewMetrics(prometheus.NewRegistry()))
+	if err != nil {
+		t.Fatalf("build server state: %v", err)
+	}
+	if state == nil {
+		t.Fatal("expected non-nil state")
 	}
 }
 

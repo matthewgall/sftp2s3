@@ -48,7 +48,7 @@ func initLogger(level, format string) *slog.Logger {
 // buildServerState loads the host key, builds the VFS, validates backends, and
 // creates the SSH server config.
 func buildServerState(cfg *Config, metrics *Metrics) (*serverState, error) {
-	signer, err := loadOrGenerateHostKey(cfg.Server.HostKey)
+	signer, err := loadOrGenerateHostKey(cfg.Server.HostKey, cfg.Server.HostKeyType)
 	if err != nil {
 		return nil, fmt.Errorf("host key: %w", err)
 	}
@@ -94,12 +94,39 @@ var (
 func main() {
 	var configPath string
 	var showVersion bool
+	var hashPassword bool
+	var verifyPassword string
+	var insecureLogPasswords bool
 	flag.StringVar(&configPath, "c", "config.yaml", "path to config file")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&hashPassword, "hash-password", false, "read a password from stdin and print a bcrypt hash")
+	flag.StringVar(&verifyPassword, "verify-password", "", "read a password from stdin and verify it against the provided bcrypt hash")
+	flag.BoolVar(&insecureLogPasswords, "insecure-log-passwords", false, "INSECURE: log received plaintext passwords to stdout for debugging")
 	flag.Parse()
+
+	if insecureLogPasswords {
+		fmt.Fprintln(os.Stderr, "WARNING: --insecure-log-passwords is enabled. Passwords will be printed in plaintext. Remove this flag immediately after debugging.")
+		setInsecureLogPasswords(true)
+	}
 
 	if showVersion {
 		fmt.Printf("sftp2s3 %s (commit %s, built %s)\n", Version, Commit, BuildDate)
+		return
+	}
+
+	if hashPassword {
+		if err := runHashPassword(); err != nil {
+			slog.Error("hash password failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if verifyPassword != "" {
+		if err := runVerifyPassword(verifyPassword); err != nil {
+			slog.Error("verify password failed", "error", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -108,6 +135,7 @@ func main() {
 		slog.Error("load config failed", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("loaded config", "path", configPath, "users", len(cfg.Users), "backends", len(cfg.Backends))
 
 	logger := initLogger(cfg.Server.LogLevel, cfg.Server.LogFormat)
 	slog.SetDefault(logger)
@@ -124,6 +152,8 @@ func main() {
 	currentState.Store(state)
 
 	connLimiter := newUserConnLimiter(cfg.Users)
+	rateRegistry := newUserRateRegistry(cfg.Users)
+	acceptLimiter := newAcceptRateLimiter(cfg.Server.MaxConnectionsPerSecond)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -145,7 +175,7 @@ func main() {
 			slog.Error("metrics listen failed", "error", err)
 			os.Exit(1)
 		}
-		startMetricsServer(ctx, metricsListener, monitor)
+		startMetricsServer(ctx, metricsListener, monitor, cfg.Server.MetricsToken, cfg.Server.MetricsCertFile, cfg.Server.MetricsKeyFile)
 	}
 
 	trackerCtx, trackerCancel := context.WithCancel(ctx)
@@ -189,8 +219,9 @@ func main() {
 				newState.tracker.Start(trackerCtx)
 
 				connLimiter.Update(newCfg.Users)
+				rateRegistry.Update(newCfg.Users)
 				currentState.Store(newState)
-				slog.Info("config reloaded")
+				slog.Info("config reloaded", "users", len(newCfg.Users), "backends", len(newCfg.Backends))
 			}
 		}
 	}()
@@ -211,7 +242,7 @@ func main() {
 		slog.Error("listen failed", "error", err)
 		os.Exit(1)
 	}
-	if err := runServer(ctx, listener, shutdownTimeout, currentState, connLimiter); err != nil {
+	if err := runServer(ctx, listener, shutdownTimeout, currentState, connLimiter, rateRegistry, acceptLimiter); err != nil {
 		slog.Error("run server failed", "error", err)
 		os.Exit(1)
 	}
