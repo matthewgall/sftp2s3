@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/term"
 )
 
 // passwordMatches reports whether pass satisfies the configured credential for
@@ -22,15 +23,26 @@ func passwordMatches(u UserConfig, pass string) bool {
 	return u.Password != "" && u.Password == pass
 }
 
-// runHashPassword reads a password from stdin and prints a bcrypt hash.
-func runHashPassword() error {
-	fmt.Fprint(os.Stderr, "Enter password: ")
+// readPassword prompts for a password and reads it without echoing when stdin
+// is a terminal. For piped input it falls back to a plain line reader.
+func readPassword(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		return string(b), err
+	}
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
+	return strings.TrimSpace(line), err
+}
+
+// runHashPassword reads a password from stdin and prints a bcrypt hash.
+func runHashPassword() error {
+	password, err := readPassword("Enter password: ")
 	if err != nil {
 		return err
 	}
-	password := strings.TrimSpace(line)
 	if password == "" {
 		return fmt.Errorf("password cannot be empty")
 	}
@@ -45,13 +57,10 @@ func runHashPassword() error {
 // runVerifyPassword reads a password from stdin and checks it against the
 // supplied bcrypt hash, printing "match" or "mismatch".
 func runVerifyPassword(hash string) error {
-	fmt.Fprint(os.Stderr, "Enter password: ")
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
+	password, err := readPassword("Enter password: ")
 	if err != nil {
 		return err
 	}
-	password := strings.TrimSpace(line)
 	if password == "" {
 		return fmt.Errorf("password cannot be empty")
 	}
