@@ -361,6 +361,32 @@ Logs:
 sudo journalctl -u sftp2s3 -f
 ```
 
+## Running on Alpine Linux (OpenRC)
+
+1. Install the binary, config, and OpenRC service:
+
+```bash
+sudo adduser -S -D -h /var/lib/sftp2s3 sftp2s3
+sudo mkdir -p /etc/sftp2s3 /var/cache/sftp2s3 /var/log/sftp2s3 /var/lib/sftp2s3
+sudo cp sftp2s3-static /usr/local/bin/sftp2s3
+sudo cp config.yaml /etc/sftp2s3/config.yaml
+sudo cp sftp2s3.env.example /etc/sftp2s3/sftp2s3.env
+sudo cp sftp2s3.initd /etc/init.d/sftp2s3
+sudo chown -R sftp2s3:sftp2s3 /var/cache/sftp2s3 /var/log/sftp2s3 /var/lib/sftp2s3
+sudo chmod 600 /etc/sftp2s3/config.yaml /etc/sftp2s3/sftp2s3.env
+sudo chmod +x /etc/init.d/sftp2s3
+```
+
+2. Enable and start the service:
+
+```bash
+sudo rc-update add sftp2s3 default
+sudo rc-service sftp2s3 start
+sudo rc-service sftp2s3 status
+```
+
+Logs are written to `/var/log/sftp2s3/sftp2s3.log`. The service uses `supervise-daemon`, so it will automatically restart if the process exits.
+
 ## Test
 
 ```bash

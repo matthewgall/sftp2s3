@@ -1,0 +1,54 @@
+#!/sbin/openrc-run
+# SFTP2S3 OpenRC service for Alpine Linux.
+# Copy to /etc/init.d/sftp2s3, chmod +x, then:
+#   rc-update add sftp2s3 default
+#   rc-service sftp2s3 start
+
+name="SFTP2S3"
+description="SFTP to S3 proxy server"
+
+: ${SFTP2S3_CONFIG:=/etc/sftp2s3/config.yaml}
+: ${SFTP2S3_ENV_FILE:=/etc/sftp2s3/sftp2s3.env}
+: ${SFTP2S3_USER:=sftp2s3}
+: ${SFTP2S3_GROUP:=sftp2s3}
+: ${SFTP2S3_CACHE_DIR:=/var/cache/sftp2s3}
+: ${SFTP2S3_LOG_DIR:=/var/log/sftp2s3}
+: ${SFTP2S3_LOG_FILE:=${SFTP2S3_LOG_DIR}/sftp2s3.log}
+
+command="/usr/local/bin/sftp2s3"
+command_args="-c ${SFTP2S3_CONFIG}"
+command_user="${SFTP2S3_USER}:${SFTP2S3_GROUP}"
+directory="/var/lib/sftp2s3"
+
+supervisor=supervise-daemon
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="${SFTP2S3_LOG_FILE}"
+error_log="${SFTP2S3_LOG_FILE}"
+
+# Export any environment variables in the env file so the daemon sees them.
+if [ -f "${SFTP2S3_ENV_FILE}" ]; then
+	set -a
+	. "${SFTP2S3_ENV_FILE}"
+	set +a
+fi
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	checkpath -d -m 0750 -o "${SFTP2S3_USER}:${SFTP2S3_GROUP}" "${SFTP2S3_CACHE_DIR}" || return 1
+	checkpath -d -m 0750 -o "${SFTP2S3_USER}:${SFTP2S3_GROUP}" "${SFTP2S3_LOG_DIR}" || return 1
+	checkpath -f -m 0640 -o "${SFTP2S3_USER}:${SFTP2S3_GROUP}" "${SFTP2S3_LOG_FILE}" || return 1
+	checkpath -d -m 0750 -o "${SFTP2S3_USER}:${SFTP2S3_GROUP}" "${directory}" || return 1
+
+	if [ ! -f "${SFTP2S3_CONFIG}" ]; then
+		eerror "Configuration file not found: ${SFTP2S3_CONFIG}"
+		return 1
+	fi
+	if [ ! -x "${command}" ]; then
+		eerror "Binary not found or not executable: ${command}"
+		return 1
+	fi
+}
