@@ -11,7 +11,7 @@ require (
 	github.com/pkg/sftp v1.13.11
 	github.com/prometheus/client_golang v1.24.1
 	go.uber.org/goleak v1.3.0
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.55.0
 	golang.org/x/term v0.45.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
