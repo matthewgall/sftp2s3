@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.10
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
-	github.com/pkg/sftp v1.13.11
+	github.com/pkg/sftp v1.13.12
 	github.com/prometheus/client_golang v1.25.0
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.58.0
