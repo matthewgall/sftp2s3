@@ -1,4 +1,4 @@
-module github.com/user/sftp2s3
+module github.com/matthewgall/sftp2s3
 
 go 1.26.0
 
