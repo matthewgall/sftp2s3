@@ -1,4 +1,4 @@
-package backend
+package health
 
 import (
 	"context"
@@ -7,18 +7,20 @@ import (
 	"time"
 
 	"github.com/matthewgall/sftp2s3/internal/metrics"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/vfs"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 type staticVFSProvider struct {
-	v atomic.Pointer[VFS]
+	v atomic.Pointer[vfs.VFS]
 }
 
-func (p *staticVFSProvider) CurrentVFS() *VFS {
+func (p *staticVFSProvider) CurrentVFS() *vfs.VFS {
 	return p.v.Load()
 }
 
-func newTestVFSProvider(vfs *VFS) *staticVFSProvider {
+func newTestVFSProvider(vfs *vfs.VFS) *staticVFSProvider {
 	p := &staticVFSProvider{}
 	p.v.Store(vfs)
 	return p
@@ -30,7 +32,7 @@ func TestBackendHealthMonitor(t *testing.T) {
 	b2 := newFailingBackend(t, "bucket2", "")
 	b2.Name = "failing"
 
-	provider := newTestVFSProvider(&VFS{Backends: map[string]*Backend{b1.Name: b1, b2.Name: b2}})
+	provider := newTestVFSProvider(&vfs.VFS{Backends: map[string]*storage.Backend{b1.Name: b1, b2.Name: b2}})
 	m := metrics.NewMetrics(prometheus.NewRegistry())
 	monitor := NewHealthMonitor(provider, m, 50*time.Millisecond)
 
@@ -56,7 +58,7 @@ func TestBackendHealthMonitorStateSwap(t *testing.T) {
 	b1 := newMockBackend(t, "bucket", "", map[string][]byte{"file.bin": make([]byte, 10)})
 	b1.Name = "primary"
 
-	provider := newTestVFSProvider(&VFS{Backends: map[string]*Backend{b1.Name: b1}})
+	provider := newTestVFSProvider(&vfs.VFS{Backends: map[string]*storage.Backend{b1.Name: b1}})
 	monitor := NewHealthMonitor(provider, nil, 50*time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -70,7 +72,7 @@ func TestBackendHealthMonitorStateSwap(t *testing.T) {
 	// Swap in a failing backend.
 	b2 := newFailingBackend(t, "bucket", "")
 	b2.Name = "primary"
-	provider.v.Store(&VFS{Backends: map[string]*Backend{b2.Name: b2}})
+	provider.v.Store(&vfs.VFS{Backends: map[string]*storage.Backend{b2.Name: b2}})
 
 	time.Sleep(100 * time.Millisecond)
 	if monitor.AllHealthy() {
@@ -80,7 +82,7 @@ func TestBackendHealthMonitorStateSwap(t *testing.T) {
 
 func TestBackendHealthMonitorDisabled(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	provider := newTestVFSProvider(&VFS{Backends: map[string]*Backend{b.Name: b}})
+	provider := newTestVFSProvider(&vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}})
 	monitor := NewHealthMonitor(provider, nil, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

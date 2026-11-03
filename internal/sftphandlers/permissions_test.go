@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/matthewgall/sftp2s3/internal/backend"
 	"github.com/matthewgall/sftp2s3/internal/config"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/vfs"
 	"github.com/pkg/sftp"
 )
 
@@ -53,7 +54,7 @@ func TestUserPermissionsLookup(t *testing.T) {
 
 func TestHandlersReadOnlyDenied(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", map[string][]byte{"file.bin": make([]byte, 10)})
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}
 	readOnly := ParsePermissions([]string{"read"})
 
 	hCmd := NewS3Handlers(context.Background(), vfs, "u", "127.0.0.1", readOnly, nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
@@ -80,7 +81,7 @@ func TestHandlersReadOnlyDenied(t *testing.T) {
 
 func TestHandlersWriteOnlyDenied(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}
 	writeOnly := ParsePermissions([]string{"write"})
 
 	hList := NewS3Handlers(context.Background(), vfs, "u", "127.0.0.1", writeOnly, nil, 0, 0, "", nil).FileList.(*S3Handlers)

@@ -1,4 +1,4 @@
-package backend
+package health
 
 import (
 	"context"
@@ -9,12 +9,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/matthewgall/sftp2s3/internal/metrics"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/vfs"
 )
 
 // VFSProvider returns the current VFS. It is typically implemented by the
 // server layer so that health checks see the latest state after a SIGHUP reload.
 type VFSProvider interface {
-	CurrentVFS() *VFS
+	CurrentVFS() *vfs.VFS
 }
 
 // HealthMonitor periodically checks that every configured backend is
@@ -80,7 +82,7 @@ func (m *HealthMonitor) checkAll() {
 	m.mu.Unlock()
 }
 
-func (m *HealthMonitor) checkBackend(b *Backend) bool {
+func (m *HealthMonitor) checkBackend(b *storage.Backend) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), b.Timeout)
 	defer cancel()
 

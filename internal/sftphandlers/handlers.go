@@ -17,16 +17,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/matthewgall/sftp2s3/internal/backend"
 	srvmetrics "github.com/matthewgall/sftp2s3/internal/metrics"
 	"github.com/matthewgall/sftp2s3/internal/ratelimit"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/vfs"
 	"github.com/pkg/sftp"
 	"golang.org/x/time/rate"
 )
 
 // S3Handlers implements the pkg/sftp request handler interfaces.
 type S3Handlers struct {
-	vfs         *backend.VFS
+	vfs         *vfs.VFS
 	user        string
 	remote      string
 	perms       UserPermissions
@@ -39,7 +40,7 @@ type S3Handlers struct {
 }
 
 // NewS3Handlers returns an sftp.Handlers backed by the supplied VFS.
-func NewS3Handlers(ctx context.Context, vfs *backend.VFS, user, remote string, perms UserPermissions, rateLimiter *rate.Limiter, maxFileSize, maxReadSize int64, cacheDir string, metrics *srvmetrics.Metrics) sftp.Handlers {
+func NewS3Handlers(ctx context.Context, vfs *vfs.VFS, user, remote string, perms UserPermissions, rateLimiter *rate.Limiter, maxFileSize, maxReadSize int64, cacheDir string, metrics *srvmetrics.Metrics) sftp.Handlers {
 	h := &S3Handlers{
 		vfs: vfs, user: user, remote: remote, perms: perms, ctx: ctx,
 		rateLimiter: rateLimiter, maxFileSize: maxFileSize, maxReadSize: maxReadSize,
@@ -54,7 +55,7 @@ func NewS3Handlers(ctx context.Context, vfs *backend.VFS, user, remote string, p
 }
 
 // recordS3Op records the result of an S3 operation, if metrics are enabled.
-func (h *S3Handlers) recordS3Op(op string, backend *backend.Backend, start time.Time, err error) {
+func (h *S3Handlers) recordS3Op(op string, backend *storage.Backend, start time.Time, err error) {
 	if h.metrics != nil {
 		h.metrics.ObserveS3Op(op, backend.Name, start, err)
 	}
@@ -62,7 +63,7 @@ func (h *S3Handlers) recordS3Op(op string, backend *backend.Backend, start time.
 
 // timedS3Op runs fn and records its duration and success/failure as an S3
 // operation named op for backend b.
-func timedS3Op[T any](h *S3Handlers, op string, b *backend.Backend, fn func() (T, error)) (T, error) {
+func timedS3Op[T any](h *S3Handlers, op string, b *storage.Backend, fn func() (T, error)) (T, error) {
 	start := time.Now()
 	v, err := fn()
 	h.recordS3Op(op, b, start, err)
@@ -70,21 +71,21 @@ func timedS3Op[T any](h *S3Handlers, op string, b *backend.Backend, fn func() (T
 }
 
 // objectExists is a metrics-aware wrapper around Backend.ObjectExists.
-func (h *S3Handlers) objectExists(ctx context.Context, b *backend.Backend, key string) (bool, error) {
+func (h *S3Handlers) objectExists(ctx context.Context, b *storage.Backend, key string) (bool, error) {
 	return timedS3Op(h, "HeadObject", b, func() (bool, error) {
 		return b.ObjectExists(ctx, key)
 	})
 }
 
 // prefixHasEntries is a metrics-aware wrapper around Backend.PrefixHasEntries.
-func (h *S3Handlers) prefixHasEntries(ctx context.Context, b *backend.Backend, prefix string) (bool, error) {
+func (h *S3Handlers) prefixHasEntries(ctx context.Context, b *storage.Backend, prefix string) (bool, error) {
 	return timedS3Op(h, "ListObjectsV2", b, func() (bool, error) {
 		return b.PrefixHasEntries(ctx, prefix)
 	})
 }
 
 // deleteObject is a metrics-aware wrapper around Backend.DeleteObject.
-func (h *S3Handlers) deleteObject(ctx context.Context, b *backend.Backend, key string) error {
+func (h *S3Handlers) deleteObject(ctx context.Context, b *storage.Backend, key string) error {
 	_, err := timedS3Op(h, "DeleteObject", b, func() (struct{}, error) {
 		return struct{}{}, b.DeleteObject(ctx, key)
 	})
@@ -92,7 +93,7 @@ func (h *S3Handlers) deleteObject(ctx context.Context, b *backend.Backend, key s
 }
 
 // deletePrefix is a metrics-aware wrapper around Backend.DeletePrefix.
-func (h *S3Handlers) deletePrefix(ctx context.Context, b *backend.Backend, prefix string) error {
+func (h *S3Handlers) deletePrefix(ctx context.Context, b *storage.Backend, prefix string) error {
 	_, err := timedS3Op(h, "DeleteObjects", b, func() (struct{}, error) {
 		return struct{}{}, b.DeletePrefix(ctx, prefix)
 	})
@@ -100,7 +101,7 @@ func (h *S3Handlers) deletePrefix(ctx context.Context, b *backend.Backend, prefi
 }
 
 // copyObject is a metrics-aware wrapper around Backend.CopyObject.
-func (h *S3Handlers) copyObject(ctx context.Context, b *backend.Backend, src, dst string) error {
+func (h *S3Handlers) copyObject(ctx context.Context, b *storage.Backend, src, dst string) error {
 	_, err := timedS3Op(h, "CopyObject", b, func() (struct{}, error) {
 		return struct{}{}, b.CopyObject(ctx, src, dst)
 	})
@@ -108,7 +109,7 @@ func (h *S3Handlers) copyObject(ctx context.Context, b *backend.Backend, src, ds
 }
 
 // nextListPage is a metrics-aware wrapper around paginator.NextPage.
-func (h *S3Handlers) nextListPage(paginator *s3.ListObjectsV2Paginator, ctx context.Context, b *backend.Backend) (*s3.ListObjectsV2Output, error) {
+func (h *S3Handlers) nextListPage(paginator *s3.ListObjectsV2Paginator, ctx context.Context, b *storage.Backend) (*s3.ListObjectsV2Output, error) {
 	return timedS3Op(h, "ListObjectsV2", b, func() (*s3.ListObjectsV2Output, error) {
 		return paginator.NextPage(ctx)
 	})
@@ -125,7 +126,7 @@ func (h *S3Handlers) logRequest(r *sftp.Request) {
 	)
 }
 
-func withBackendTimeout(ctx context.Context, b *backend.Backend) (context.Context, context.CancelFunc) {
+func withBackendTimeout(ctx context.Context, b *storage.Backend) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, b.Timeout)
 }
 
@@ -143,7 +144,7 @@ func sanitizePath(p string) (string, error) {
 }
 
 // resolve sanitizes and resolves p against the handler's VFS.
-func (h *S3Handlers) resolve(p string) (*backend.Backend, string, error) {
+func (h *S3Handlers) resolve(p string) (*storage.Backend, string, error) {
 	p, err := sanitizePath(p)
 	if err != nil {
 		return nil, "", err
@@ -163,7 +164,7 @@ func (h *S3Handlers) resolve(p string) (*backend.Backend, string, error) {
 
 // s3Reader implements io.ReaderAt by fetching byte ranges from S3 on demand.
 type s3Reader struct {
-	backend     *backend.Backend
+	backend     *storage.Backend
 	key         string
 	size        int64
 	ctx         context.Context
@@ -272,7 +273,7 @@ func (h *S3Handlers) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 // s3Writer buffers SFTP writes to a temp file and uploads the result to S3 on
 // close.
 type s3Writer struct {
-	backend     *backend.Backend
+	backend     *storage.Backend
 	key         string
 	file        *os.File
 	size        int64
@@ -532,7 +533,7 @@ func (h *S3Handlers) handleRename(ctx context.Context, oldPath, newPath string) 
 }
 
 // sameBackendRename renames within a single S3 backend using CopyObject.
-func (h *S3Handlers) sameBackendRename(ctx context.Context, b *backend.Backend, oldKey, newKey string) error {
+func (h *S3Handlers) sameBackendRename(ctx context.Context, b *storage.Backend, oldKey, newKey string) error {
 	if err := h.sameBackendCopy(ctx, b, oldKey, newKey); err != nil {
 		return err
 	}
@@ -553,7 +554,7 @@ func (h *S3Handlers) sameBackendRename(ctx context.Context, b *backend.Backend, 
 
 // sameBackendCopy copies oldKey to newKey within a single S3 backend using
 // server-side CopyObject.
-func (h *S3Handlers) sameBackendCopy(ctx context.Context, b *backend.Backend, oldKey, newKey string) error {
+func (h *S3Handlers) sameBackendCopy(ctx context.Context, b *storage.Backend, oldKey, newKey string) error {
 	ctx, cancel := withBackendTimeout(ctx, b)
 	defer cancel()
 
@@ -613,7 +614,7 @@ func (h *S3Handlers) sameBackendCopy(ctx context.Context, b *backend.Backend, ol
 
 // crossBackendRename copies an object or tree from one backend to another by
 // streaming through sftp2s3.
-func (h *S3Handlers) crossBackendRename(ctx context.Context, srcB *backend.Backend, srcKey string, dstB *backend.Backend, dstKey string) error {
+func (h *S3Handlers) crossBackendRename(ctx context.Context, srcB *storage.Backend, srcKey string, dstB *storage.Backend, dstKey string) error {
 	if err := h.crossBackendCopy(ctx, srcB, srcKey, dstB, dstKey); err != nil {
 		return err
 	}
@@ -633,7 +634,7 @@ func (h *S3Handlers) crossBackendRename(ctx context.Context, srcB *backend.Backe
 
 // crossBackendCopy copies an object or tree from one backend to another by
 // streaming through sftp2s3.
-func (h *S3Handlers) crossBackendCopy(ctx context.Context, srcB *backend.Backend, srcKey string, dstB *backend.Backend, dstKey string) error {
+func (h *S3Handlers) crossBackendCopy(ctx context.Context, srcB *storage.Backend, srcKey string, dstB *storage.Backend, dstKey string) error {
 	srcObjKey := srcB.ObjectKey(srcKey)
 	dstObjKey := dstB.ObjectKey(dstKey)
 
@@ -717,7 +718,7 @@ func (h *S3Handlers) handleCopy(ctx context.Context, srcPath, dstPath string) er
 
 // streamCopyObject copies a single S3 object from srcB to dstB by streaming
 // the body. No more than one backend's part size is held in memory at once.
-func (h *S3Handlers) streamCopyObject(ctx context.Context, srcB *backend.Backend, srcKey string, dstB *backend.Backend, dstKey string) error {
+func (h *S3Handlers) streamCopyObject(ctx context.Context, srcB *storage.Backend, srcKey string, dstB *storage.Backend, dstKey string) error {
 	// Use a generous timeout for the whole stream: the HTTP client-level
 	// timeouts still govern individual range/part requests.
 	timeout := ratelimit.MaxDuration(srcB.Timeout, dstB.Timeout) * 10

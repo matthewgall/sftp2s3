@@ -1,16 +1,16 @@
-package backend
+package storage
 
 import (
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
-	"github.com/matthewgall/sftp2s3/internal/backendtest"
+	"github.com/matthewgall/sftp2s3/internal/storagetest"
 )
 
 func newMockBackend(t *testing.T, bucket, prefix string, content map[string][]byte) *Backend {
 	t.Helper()
-	client := backendtest.NewS3Client(t, content, false)
+	client := storagetest.NewS3Client(t, content, false)
 	return &Backend{
 		Name:     "mock",
 		Bucket:   bucket,
@@ -24,7 +24,7 @@ func newMockBackend(t *testing.T, bucket, prefix string, content map[string][]by
 
 func newFailingBackend(t *testing.T, bucket, prefix string) *Backend {
 	t.Helper()
-	client := backendtest.NewS3Client(t, nil, true)
+	client := storagetest.NewS3Client(t, nil, true)
 	return &Backend{
 		Name:     "mock",
 		Bucket:   bucket,

@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/matthewgall/sftp2s3/internal/auth"
-	"github.com/matthewgall/sftp2s3/internal/backend"
 	"github.com/matthewgall/sftp2s3/internal/config"
+	"github.com/matthewgall/sftp2s3/internal/health"
 	"github.com/matthewgall/sftp2s3/internal/metrics"
 	"github.com/matthewgall/sftp2s3/internal/ratelimit"
 	"github.com/matthewgall/sftp2s3/internal/server"
@@ -166,7 +166,7 @@ func run(args []string, stdin io.Reader) int {
 		}
 		healthInterval = d
 	}
-	monitor := backend.NewHealthMonitor(state, m, healthInterval)
+	monitor := health.NewHealthMonitor(state, m, healthInterval)
 
 	if cfg.Server.MetricsAddr != "" {
 		metricsListener, err := net.Listen("tcp", cfg.Server.MetricsAddr)

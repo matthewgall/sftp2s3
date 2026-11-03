@@ -1,5 +1,5 @@
 // Package backendtest provides an in-memory S3 client for tests.
-package backendtest
+package storagetest
 
 import (
 	"bytes"

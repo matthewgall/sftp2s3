@@ -12,10 +12,11 @@ import (
 	"time"
 
 	"github.com/matthewgall/sftp2s3/internal/auth"
-	"github.com/matthewgall/sftp2s3/internal/backend"
 	"github.com/matthewgall/sftp2s3/internal/config"
 	"github.com/matthewgall/sftp2s3/internal/metrics"
 	"github.com/matthewgall/sftp2s3/internal/ratelimit"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/vfs"
 	"github.com/pkg/sftp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/ssh"
@@ -35,7 +36,7 @@ func TestSFTPIntegration(t *testing.T) {
 	// Build a VFS with a single mock backend.
 	objects := map[string][]byte{}
 	b := newMockBackendHelper(t, "bucket", "", objects)
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}
 
 	cfg := &config.Config{}
 	cfg.Server.Host = "127.0.0.1"

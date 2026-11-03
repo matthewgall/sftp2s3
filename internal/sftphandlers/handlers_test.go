@@ -11,21 +11,22 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/matthewgall/sftp2s3/internal/backend"
 	"github.com/matthewgall/sftp2s3/internal/ratelimit"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/vfs"
 	"github.com/pkg/sftp"
 )
 
 func newTestHandlers(t *testing.T, objects map[string][]byte) *S3Handlers {
 	t.Helper()
 	b := newMockBackend(t, "bucket", "router/", objects)
-	return NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
+	return NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 }
 
 func newTestListHandlers(t *testing.T, objects map[string][]byte) *S3Handlers {
 	t.Helper()
 	b := newMockBackend(t, "bucket", "router/", objects)
-	return NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
+	return NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
 }
 
 func TestHandlersListDirectory(t *testing.T) {
@@ -171,7 +172,7 @@ func TestHandlersRenameFile(t *testing.T) {
 
 func TestHandlersListRoot(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
 	infos, err := h.listRoot()
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +211,7 @@ func TestHandlersLstat(t *testing.T) {
 
 func TestHandlersStatNotFound(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
 	ctx := context.Background()
 	_, err := h.statPath(ctx, "/mock/missing")
 	if !errors.Is(err, os.ErrNotExist) {
@@ -221,7 +222,7 @@ func TestHandlersStatNotFound(t *testing.T) {
 func TestHandlersFilewrite(t *testing.T) {
 	objects := map[string][]byte{}
 	b := newMockBackend(t, "bucket", "", objects)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FilePut.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FilePut.(*S3Handlers)
 
 	w, err := h.Filewrite(&sftp.Request{Filepath: "/mock/file.bin", Method: "Put"})
 	if err != nil {
@@ -243,7 +244,7 @@ func TestHandlersFilewrite(t *testing.T) {
 func TestHandlersMkdir(t *testing.T) {
 	objects := map[string][]byte{}
 	b := newMockBackend(t, "bucket", "", objects)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{Filepath: "/mock/dir", Method: "Mkdir"}); err != nil {
 		t.Fatal(err)
@@ -255,7 +256,7 @@ func TestHandlersMkdir(t *testing.T) {
 
 func TestHandlersSetstat(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 	if err := h.Filecmd(&sftp.Request{Filepath: "/mock/file.bin", Method: "Setstat"}); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +267,7 @@ func TestHandlersRenameCrossBackend(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{
@@ -350,7 +351,7 @@ func TestS3ReaderMaxReadSize(t *testing.T) {
 
 func TestS3WriterMaxFileSize(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 10, 0, "", nil).FilePut.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 10, 0, "", nil).FilePut.(*S3Handlers)
 
 	w, err := h.Filewrite(&sftp.Request{Filepath: "/mock/file.bin", Method: "Put"})
 	if err != nil {
@@ -371,7 +372,7 @@ func TestHandlersListDirectoryEmptyPrefix(t *testing.T) {
 		"dir/file2.bin": make([]byte, 200),
 	}
 	b := newMockBackend(t, "bucket", "", objects)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileList.(*S3Handlers)
 	ctx := context.Background()
 
 	infos, err := h.listDirectory(ctx, "/mock")
@@ -401,7 +402,7 @@ func TestHandlersRenameCrossBackendDirectory(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{
@@ -476,7 +477,7 @@ func TestHandlersCopyCrossBackend(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{
@@ -503,7 +504,7 @@ func TestHandlersCopyCrossBackend(t *testing.T) {
 
 func TestFilereadDirectoryError(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileGet.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileGet.(*S3Handlers)
 
 	_, err := h.Fileread(&sftp.Request{Filepath: "/mock", Method: "Get"})
 	if err == nil {
@@ -513,7 +514,7 @@ func TestFilereadDirectoryError(t *testing.T) {
 
 func TestFilereadNotFound(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileGet.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileGet.(*S3Handlers)
 
 	_, err := h.Fileread(&sftp.Request{Filepath: "/mock/missing.bin", Method: "Get"})
 	if !errors.Is(err, os.ErrNotExist) {
@@ -523,7 +524,7 @@ func TestFilereadNotFound(t *testing.T) {
 
 func TestFilewriteDirectoryError(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FilePut.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FilePut.(*S3Handlers)
 
 	_, err := h.Filewrite(&sftp.Request{Filepath: "/mock", Method: "Put"})
 	if err == nil {
@@ -557,7 +558,7 @@ func TestHandlersCopyCrossBackendMissingFile(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	err := h.Filecmd(&sftp.Request{
@@ -575,7 +576,7 @@ func TestHandlersCopyCrossBackendEmptyDirectory(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{
@@ -604,7 +605,7 @@ func TestHandlersCopyDirectoryTreeCrossBackend(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{
@@ -633,7 +634,7 @@ func TestHandlersCopyDirectoryTreeCrossBackend(t *testing.T) {
 
 func TestResolveRoot(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	backend, key, err := h.resolve("/")
 	if err != nil {
@@ -646,7 +647,7 @@ func TestResolveRoot(t *testing.T) {
 
 func TestResolveTraversalRejected(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if _, _, err := h.resolve("/../etc/passwd"); err == nil {
 		t.Fatal("expected traversal error")
@@ -656,7 +657,7 @@ func TestResolveTraversalRejected(t *testing.T) {
 func TestFilewriteWithRateLimiter(t *testing.T) {
 	b := newMockBackend(t, "bucket", "", nil)
 	lim := ratelimit.NewUserRateLimiter(1024)
-	h := NewS3Handlers(context.Background(), &backend.VFS{Backends: map[string]*backend.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), lim, 0, 0, "", nil).FilePut.(*S3Handlers)
+	h := NewS3Handlers(context.Background(), &vfs.VFS{Backends: map[string]*storage.Backend{b.Name: b}}, "testuser", "127.0.0.1", AllPermissions(), lim, 0, 0, "", nil).FilePut.(*S3Handlers)
 
 	w, err := h.Filewrite(&sftp.Request{Filepath: "/mock/file.bin", Method: "Put"})
 	if err != nil {
@@ -725,7 +726,7 @@ func TestHandlersRenameDirectoryCrossBackend(t *testing.T) {
 	b2 := newMockBackend(t, "bucket2", "", nil)
 	b1.Name = "a"
 	b2.Name = "b"
-	vfs := &backend.VFS{Backends: map[string]*backend.Backend{"a": b1, "b": b2}}
+	vfs := &vfs.VFS{Backends: map[string]*storage.Backend{"a": b1, "b": b2}}
 	h := NewS3Handlers(context.Background(), vfs, "testuser", "127.0.0.1", AllPermissions(), nil, 0, 0, "", nil).FileCmd.(*S3Handlers)
 
 	if err := h.Filecmd(&sftp.Request{

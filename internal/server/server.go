@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/matthewgall/sftp2s3/internal/auth"
-	"github.com/matthewgall/sftp2s3/internal/backend"
 	"github.com/matthewgall/sftp2s3/internal/config"
 	"github.com/matthewgall/sftp2s3/internal/metrics"
 	"github.com/matthewgall/sftp2s3/internal/ratelimit"
 	"github.com/matthewgall/sftp2s3/internal/sftphandlers"
+	vfspkg "github.com/matthewgall/sftp2s3/internal/vfs"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/time/rate"
@@ -45,7 +45,7 @@ func BuildState(cfg *config.Config, m *metrics.Metrics) (*State, error) {
 		return nil, fmt.Errorf("sshid keys: %w", err)
 	}
 
-	vfs, err := backend.NewVFS(cfg.Backends)
+	vfs, err := vfspkg.NewVFS(cfg.Backends)
 	if err != nil {
 		return nil, fmt.Errorf("init vfs: %w", err)
 	}
@@ -73,8 +73,8 @@ func BuildState(cfg *config.Config, m *metrics.Metrics) (*State, error) {
 	}, nil
 }
 
-// CurrentVFS implements backend.VFSProvider for health checks.
-func (s *State) CurrentVFS() *backend.VFS {
+// CurrentVFS implements health.VFSProvider for health checks.
+func (s *State) CurrentVFS() *vfspkg.VFS {
 	if s == nil {
 		return nil
 	}
@@ -212,7 +212,7 @@ func NewSSHServerConfig(users []config.UserConfig, signer ssh.Signer, tracker *a
 type State struct {
 	cfg     *config.Config
 	sshCfg  *ssh.ServerConfig
-	vfs     *backend.VFS
+	vfs     *vfspkg.VFS
 	tracker *auth.FailureTracker
 	metrics *metrics.Metrics
 }

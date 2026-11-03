@@ -1,4 +1,4 @@
-package backend
+package vfs
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/matthewgall/sftp2s3/internal/config"
+	"github.com/matthewgall/sftp2s3/internal/storage"
 )
 
 func makeTestVFS() *VFS {
 	return &VFS{
-		Backends: map[string]*Backend{
+		Backends: map[string]*storage.Backend{
 			"alpha": {Name: "alpha", Bucket: "a"},
 			"beta":  {Name: "beta", Bucket: "b"},
 			"gamma": {Name: "gamma", Bucket: "c"},
@@ -62,7 +63,7 @@ func TestNewVFSInvalidTimeout(t *testing.T) {
 }
 
 func TestBackendPrefixNormalization(t *testing.T) {
-	b := &Backend{Prefix: "router/"}
+	b := &storage.Backend{Prefix: "router/"}
 	if got := b.ObjectKey("file.bin"); got != "router/file.bin" {
 		t.Fatalf("objectKey=%q, want router/file.bin", got)
 	}
@@ -144,7 +145,7 @@ func TestVFSFilter(t *testing.T) {
 }
 
 func TestBackendObjectKey(t *testing.T) {
-	b := &Backend{Prefix: "router/"}
+	b := &storage.Backend{Prefix: "router/"}
 	if got := b.ObjectKey("file.bin"); got != "router/file.bin" {
 		t.Fatalf("objectKey(file.bin)=%q, want router/file.bin", got)
 	}
@@ -152,7 +153,7 @@ func TestBackendObjectKey(t *testing.T) {
 		t.Fatalf("objectKey()=%q, want router/", got)
 	}
 
-	b2 := &Backend{Prefix: ""}
+	b2 := &storage.Backend{Prefix: ""}
 	if got := b2.ObjectKey("file.bin"); got != "file.bin" {
 		t.Fatalf("objectKey(file.bin)=%q, want file.bin", got)
 	}
@@ -220,7 +221,7 @@ func TestVFSValidate(t *testing.T) {
 	b := newMockBackend(t, "bucket", "router/", map[string][]byte{
 		"router/file.bin": make([]byte, 100),
 	})
-	vfs := &VFS{Backends: map[string]*Backend{b.Name: b}}
+	vfs := &VFS{Backends: map[string]*storage.Backend{b.Name: b}}
 	if err := vfs.Validate(context.Background()); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -228,14 +229,14 @@ func TestVFSValidate(t *testing.T) {
 
 func TestVFSValidateFailure(t *testing.T) {
 	b := newFailingBackend(t, "bucket", "")
-	vfs := &VFS{Backends: map[string]*Backend{b.Name: b}}
+	vfs := &VFS{Backends: map[string]*storage.Backend{b.Name: b}}
 	if err := vfs.Validate(context.Background()); err == nil {
 		t.Fatal("expected validation error from failing backend")
 	}
 }
 
 func TestBackendDirPrefix(t *testing.T) {
-	b := &Backend{Prefix: "router/"}
+	b := &storage.Backend{Prefix: "router/"}
 	if got := b.DirPrefix("dir"); got != "router/dir/" {
 		t.Fatalf("dirPrefix(dir)=%q, want router/dir/", got)
 	}
@@ -243,7 +244,7 @@ func TestBackendDirPrefix(t *testing.T) {
 		t.Fatalf("dirPrefix()=%q, want router/", got)
 	}
 
-	empty := &Backend{Prefix: ""}
+	empty := &storage.Backend{Prefix: ""}
 	if got := empty.DirPrefix("dir"); got != "dir/" {
 		t.Fatalf("dirPrefix(dir)=%q, want dir/", got)
 	}

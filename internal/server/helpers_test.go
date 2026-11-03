@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
-	"github.com/matthewgall/sftp2s3/internal/backend"
-	"github.com/matthewgall/sftp2s3/internal/backendtest"
+	"github.com/matthewgall/sftp2s3/internal/storage"
+	"github.com/matthewgall/sftp2s3/internal/storagetest"
 )
 
-func newMockBackendHelper(t *testing.T, bucket, prefix string, content map[string][]byte) *backend.Backend {
+func newMockBackendHelper(t *testing.T, bucket, prefix string, content map[string][]byte) *storage.Backend {
 	t.Helper()
-	client := backendtest.NewS3Client(t, content, false)
-	return &backend.Backend{
+	client := storagetest.NewS3Client(t, content, false)
+	return &storage.Backend{
 		Name:     "mock",
 		Bucket:   bucket,
 		Prefix:   prefix,
