@@ -12,10 +12,10 @@ LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.Bui
 all: build
 
 build:
-	go build -ldflags="$(LDFLAGS)" -o $(BINARY) .
+	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/sftp2s3
 
 build-static:
-	CGO_ENABLED=0 GOOS=linux go build -ldflags="$(LDFLAGS)" -o $(BINARY)-static .
+	CGO_ENABLED=0 GOOS=linux go build -ldflags="$(LDFLAGS)" -o $(BINARY)-static ./cmd/sftp2s3
 
 test:
 	go test ./...
@@ -27,4 +27,4 @@ run: build
 	./$(BINARY)
 
 version:
-	@go run -ldflags="$(LDFLAGS)" . -version
+	@go run -ldflags="$(LDFLAGS)" ./cmd/sftp2s3 -version

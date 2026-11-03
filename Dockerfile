@@ -10,7 +10,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" \
-    -o sftp2s3 .
+    -o sftp2s3 ./cmd/sftp2s3
 
 # Runtime stage
 FROM alpine:latest
