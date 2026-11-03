@@ -61,6 +61,42 @@ func TestUserBackendPrefixes(t *testing.T) {
 	}
 }
 
+func TestEffectiveMaxFileSize(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Server.MaxFileSize = 100
+	cfg.Users = []config.UserConfig{
+		{Username: "alice", MaxFileSize: 200},
+		{Username: "bob"},
+	}
+	if got := effectiveMaxFileSize(cfg, "alice"); got != 200 {
+		t.Fatalf("alice max=%d, want 200", got)
+	}
+	if got := effectiveMaxFileSize(cfg, "bob"); got != 100 {
+		t.Fatalf("bob max=%d, want 100", got)
+	}
+	if got := effectiveMaxFileSize(cfg, "unknown"); got != 100 {
+		t.Fatalf("unknown max=%d, want 100", got)
+	}
+}
+
+func TestEffectiveMaxReadSize(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Server.MaxReadSize = 100
+	cfg.Users = []config.UserConfig{
+		{Username: "alice", MaxReadSize: 50},
+		{Username: "bob"},
+	}
+	if got := effectiveMaxReadSize(cfg, "alice"); got != 50 {
+		t.Fatalf("alice max=%d, want 50", got)
+	}
+	if got := effectiveMaxReadSize(cfg, "bob"); got != 100 {
+		t.Fatalf("bob max=%d, want 100", got)
+	}
+	if got := effectiveMaxReadSize(cfg, "unknown"); got != 100 {
+		t.Fatalf("unknown max=%d, want 100", got)
+	}
+}
+
 func TestIsBenignHandshakeErr(t *testing.T) {
 	if isBenignHandshakeErr(nil) {
 		t.Fatal("nil error should not be benign")

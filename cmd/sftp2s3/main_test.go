@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/matthewgall/sftp2s3/internal/config"
@@ -213,5 +215,128 @@ func TestInitLogger(t *testing.T) {
 		if logger.Enabled(nil, slog.LevelInfo) && tt.level == "error" {
 			t.Fatalf("expected info to be disabled for error level")
 		}
+	}
+}
+
+func TestRunVersion(t *testing.T) {
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	code := run([]string{"sftp2s3", "-version"}, nil)
+	_ = w.Close()
+	os.Stdout = oldStdout
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "sftp2s3") {
+		t.Fatalf("expected version output, got %q", out)
+	}
+}
+
+func TestRunInvalidFlag(t *testing.T) {
+	code := run([]string{"sftp2s3", "-not-a-real-flag"}, nil)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+}
+
+func TestRunInsecureLogPasswordsRequiresEnv(t *testing.T) {
+	t.Setenv("SFTP2S3_I_AM_RECKLESSLY_LEAKING_PASSWORDS", "")
+	code := run([]string{"sftp2s3", "--insecure-log-passwords", "-version"}, nil)
+	if code != 1 {
+		t.Fatalf("expected exit 1 without acknowledgement env, got %d", code)
+	}
+}
+
+func TestRunInsecureLogPasswordsWithEnv(t *testing.T) {
+	t.Setenv("SFTP2S3_I_AM_RECKLESSLY_LEAKING_PASSWORDS", "1")
+	code := run([]string{"sftp2s3", "--insecure-log-passwords", "-version"}, nil)
+	if code != 0 {
+		t.Fatalf("expected exit 0 with acknowledgement env, got %d", code)
+	}
+}
+
+func TestRunHashAndVerifyPassword(t *testing.T) {
+	dir := t.TempDir()
+	hashFile := filepath.Join(dir, "hash.txt")
+
+	stdinR, stdinW, _ := os.Pipe()
+	go func() { _, _ = stdinW.WriteString("testpass\n"); _ = stdinW.Close() }()
+
+	code := run([]string{"sftp2s3", "-hash-password", "-hash-password-output", hashFile}, stdinR)
+	if code != 0 {
+		t.Fatalf("hash-password exit code: %d", code)
+	}
+	if _, err := os.Stat(hashFile); err != nil {
+		t.Fatalf("hash file not created: %v", err)
+	}
+
+	hash, err := os.ReadFile(hashFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdinR2, stdinW2, _ := os.Pipe()
+	go func() { _, _ = stdinW2.WriteString("testpass\n"); _ = stdinW2.Close() }()
+	code = run([]string{"sftp2s3", "-verify-password", string(hash)}, stdinR2)
+	if code != 0 {
+		t.Fatalf("verify-password (match) exit code: %d", code)
+	}
+
+	stdinR3, stdinW3, _ := os.Pipe()
+	go func() { _, _ = stdinW3.WriteString("wrongpass\n"); _ = stdinW3.Close() }()
+	code = run([]string{"sftp2s3", "-verify-password", string(hash)}, stdinR3)
+	if code != 0 {
+		t.Fatalf("verify-password (mismatch) exit code: %d", code)
+	}
+}
+
+func TestRunHashPasswordEmptyInput(t *testing.T) {
+	dir := t.TempDir()
+	hashFile := filepath.Join(dir, "empty.txt")
+	stdinR, stdinW, _ := os.Pipe()
+	_ = stdinW.Close()
+	code := run([]string{"sftp2s3", "-hash-password", "-hash-password-output", hashFile}, stdinR)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for empty password, got %d", code)
+	}
+}
+
+func TestRunLoadConfigFailure(t *testing.T) {
+	code := run([]string{"sftp2s3", "-c", "/nonexistent/config.yaml"}, nil)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for missing config, got %d", code)
+	}
+}
+
+func TestRunInvalidServerDurations(t *testing.T) {
+	dir := t.TempDir()
+
+	badHealth := filepath.Join(dir, "bad_health.yaml")
+	os.WriteFile(badHealth, []byte(`
+server:
+  host_key: /dev/null
+  backend_health_interval: not-a-duration
+users:
+  - username: alice
+    password: secret
+`), 0600)
+	if code := run([]string{"sftp2s3", "-c", badHealth}, nil); code != 1 {
+		t.Fatalf("bad health interval: expected exit 1, got %d", code)
+	}
+
+	badShutdown := filepath.Join(dir, "bad_shutdown.yaml")
+	os.WriteFile(badShutdown, []byte(`
+server:
+  host_key: /dev/null
+  shutdown_timeout: not-a-duration
+users:
+  - username: alice
+    password: secret
+`), 0600)
+	if code := run([]string{"sftp2s3", "-c", badShutdown}, nil); code != 1 {
+		t.Fatalf("bad shutdown timeout: expected exit 1, got %d", code)
 	}
 }

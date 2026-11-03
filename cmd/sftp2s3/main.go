@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -22,6 +23,12 @@ import (
 	"github.com/matthewgall/sftp2s3/internal/ratelimit"
 	"github.com/matthewgall/sftp2s3/internal/server"
 	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
 )
 
 // requireRecklessEnv returns an error if the named acknowledgement env var is
@@ -61,32 +68,38 @@ func initLogger(level, format string) *slog.Logger {
 	return slog.New(handler)
 }
 
-var (
-	Version   = "dev"
-	Commit    = "unknown"
-	BuildDate = "unknown"
-)
-
 func main() {
+	os.Exit(run(os.Args, os.Stdin))
+}
+
+// run parses flags and executes the requested sub-command. It returns an exit
+// code so that tests can exercise main() without calling os.Exit directly.
+func run(args []string, stdin io.Reader) int {
 	var configPath string
 	var showVersion bool
 	var hashPassword bool
 	var hashPasswordOutput string
 	var verifyPassword string
 	var insecureLogPasswords bool
-	flag.StringVar(&configPath, "c", "config.yaml", "path to config file")
-	flag.BoolVar(&showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&hashPassword, "hash-password", false, "read a password from stdin and write a bcrypt hash to a file")
-	flag.StringVar(&hashPasswordOutput, "hash-password-output", "", "output file for -hash-password (default sftp2s3.hash, use - for stdout)")
-	flag.StringVar(&verifyPassword, "verify-password", "", "read a password from stdin and verify it against the provided bcrypt hash")
-	flag.BoolVar(&insecureLogPasswords, "insecure-log-passwords", false, "INSECURE: log received plaintext passwords to stdout for debugging")
-	flag.Parse()
+
+	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&configPath, "c", "config.yaml", "path to config file")
+	flags.BoolVar(&showVersion, "version", false, "print version and exit")
+	flags.BoolVar(&hashPassword, "hash-password", false, "read a password from stdin and write a bcrypt hash to a file")
+	flags.StringVar(&hashPasswordOutput, "hash-password-output", "", "output file for -hash-password (default sftp2s3.hash, use - for stdout)")
+	flags.StringVar(&verifyPassword, "verify-password", "", "read a password from stdin and verify it against the provided bcrypt hash")
+	flags.BoolVar(&insecureLogPasswords, "insecure-log-passwords", false, "INSECURE: log received plaintext passwords to stdout for debugging")
+	if err := flags.Parse(args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "usage error: %v\n", err)
+		return 1
+	}
 
 	if insecureLogPasswords {
 		const recklessEnv = "SFTP2S3_I_AM_RECKLESSLY_LEAKING_PASSWORDS"
 		if err := requireRecklessEnv(recklessEnv); err != nil {
-			slog.Error("refusing to start with --insecure-log-passwords", "error", err)
-			os.Exit(1)
+			fmt.Fprintf(os.Stderr, "refusing to start with --insecure-log-passwords: %v\n", err)
+			return 1
 		}
 		fmt.Fprintf(os.Stderr, "WARNING: --insecure-log-passwords is enabled. Passwords will be printed in plaintext. Remove this flag immediately after debugging.\n")
 		server.SetInsecureLogPasswords(true)
@@ -94,44 +107,44 @@ func main() {
 
 	if showVersion {
 		fmt.Printf("sftp2s3 %s (commit %s, built %s)\n", Version, Commit, BuildDate)
-		return
+		return 0
 	}
 
 	if hashPassword {
 		if hashPasswordOutput == "" {
 			hashPasswordOutput = "sftp2s3.hash"
 		}
-		if err := auth.RunHashPassword(hashPasswordOutput); err != nil {
-			slog.Error("hash password failed", "error", err)
-			os.Exit(1)
+		if err := runPasswordOp(stdin, hashPasswordOutput, auth.RunHashPassword); err != nil {
+			fmt.Fprintf(os.Stderr, "hash password failed: %v\n", err)
+			return 1
 		}
-		return
+		return 0
 	}
 
 	if verifyPassword != "" {
-		if err := auth.RunVerifyPassword(verifyPassword); err != nil {
-			slog.Error("verify password failed", "error", err)
-			os.Exit(1)
+		if err := runPasswordOp(stdin, verifyPassword, auth.RunVerifyPassword); err != nil {
+			fmt.Fprintf(os.Stderr, "verify password failed: %v\n", err)
+			return 1
 		}
-		return
+		return 0
 	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		slog.Error("load config failed", "error", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
+		return 1
 	}
-	slog.Info("loaded config", "path", configPath, "users", len(cfg.Users), "backends", len(cfg.Backends))
 
 	logger := initLogger(cfg.Server.LogLevel, cfg.Server.LogFormat)
 	slog.SetDefault(logger)
+	slog.Info("loaded config", "path", configPath, "users", len(cfg.Users), "backends", len(cfg.Backends))
 
-	m := metrics.NewMetrics(prometheus.DefaultRegisterer)
+	m := metrics.NewMetrics(prometheus.NewRegistry())
 
 	state, err := server.BuildState(cfg, m)
 	if err != nil {
 		slog.Error("build server state failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	currentState := &atomic.Pointer[server.State]{}
@@ -149,7 +162,7 @@ func main() {
 		d, err := time.ParseDuration(cfg.Server.BackendHealthInterval)
 		if err != nil {
 			slog.Error("invalid backend_health_interval", "value", cfg.Server.BackendHealthInterval, "error", err)
-			os.Exit(1)
+			return 1
 		}
 		healthInterval = d
 	}
@@ -159,7 +172,7 @@ func main() {
 		metricsListener, err := net.Listen("tcp", cfg.Server.MetricsAddr)
 		if err != nil {
 			slog.Error("metrics listen failed", "error", err)
-			os.Exit(1)
+			return 1
 		}
 		metrics.StartServer(ctx, metricsListener, monitor, cfg.Server.MetricsToken, cfg.Server.MetricsCertFile, cfg.Server.MetricsKeyFile)
 	}
@@ -217,7 +230,7 @@ func main() {
 		d, err := time.ParseDuration(cfg.Server.ShutdownTimeout)
 		if err != nil {
 			slog.Error("invalid shutdown_timeout", "value", cfg.Server.ShutdownTimeout, "error", err)
-			os.Exit(1)
+			return 1
 		}
 		shutdownTimeout = d
 	}
@@ -226,10 +239,28 @@ func main() {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		slog.Error("listen failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	if err := server.Run(ctx, listener, shutdownTimeout, currentState, connLimiter, rateRegistry, acceptLimiter); err != nil {
 		slog.Error("run server failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
+}
+
+// passwordOp is the signature of auth.RunHashPassword and auth.RunVerifyPassword.
+type passwordOp func(string) error
+
+// runPasswordOp temporarily swaps os.Stdin so that the auth package reads from
+// the supplied reader. It restores the original stdin before returning.
+func runPasswordOp(stdin io.Reader, arg string, op passwordOp) error {
+	if stdin != nil {
+		oldStdin := os.Stdin
+		f, ok := stdin.(*os.File)
+		if ok {
+			os.Stdin = f
+			defer func() { os.Stdin = oldStdin }()
+		}
+	}
+	return op(arg)
 }
